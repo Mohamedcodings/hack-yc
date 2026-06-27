@@ -52,6 +52,68 @@ type RasterCell = {
   thermal: number
 }
 
+type CropStrip = {
+  area: string
+  color: string
+  crop: string
+  name: string
+  positions: [number, number][]
+}
+
+const cropStrips: CropStrip[] = [
+  {
+    name: 'Strip A',
+    crop: 'Blé tendre',
+    area: '6.8 ha',
+    color: '#58a6ff',
+    positions: [
+      [50.253112, 2.746722],
+      [50.25186, 2.74382],
+      [50.24864, 2.74677],
+      [50.250025, 2.749275],
+      [50.25174, 2.750916],
+    ],
+  },
+  {
+    name: 'Strip B',
+    crop: 'Colza',
+    area: '5.4 ha',
+    color: '#f2c84b',
+    positions: [
+      [50.25186, 2.74382],
+      [50.251575, 2.743127],
+      [50.251129, 2.741239],
+      [50.247809, 2.745659],
+      [50.24864, 2.74677],
+    ],
+  },
+  {
+    name: 'Strip C',
+    crop: 'Betterave',
+    area: '4.2 ha',
+    color: '#db6fbd',
+    positions: [
+      [50.25186, 2.74382],
+      [50.253112, 2.746722],
+      [50.25174, 2.750916],
+      [50.25062, 2.74984],
+      [50.24955, 2.74792],
+    ],
+  },
+  {
+    name: 'Strip D',
+    crop: 'Pomme de terre',
+    area: '3.9 ha',
+    color: '#ff8f4f',
+    positions: [
+      [50.24955, 2.74792],
+      [50.25062, 2.74984],
+      [50.250025, 2.749275],
+      [50.24864, 2.74677],
+    ],
+  },
+]
+
 const latStep = 0.000105
 const lngStep = 0.000145
 
@@ -194,7 +256,15 @@ function App() {
             <h2>Map settings</h2>
             <SettingRow icon={Sprout} label="Planting" />
             <SettingRow icon={Radar} label="Productivity map" />
+            <SettingRow icon={Layers3} label="Crop layout" />
             <SettingRow icon={Grid2X2} label={`${zoneCount} zones`} />
+          </section>
+
+          <section className="config-group crop-layout-group">
+            <h2>Crop layout</h2>
+            {cropStrips.map((strip) => (
+              <CropStripRow key={strip.name} strip={strip} />
+            ))}
           </section>
 
           <section className="config-group">
@@ -383,6 +453,20 @@ function App() {
             positions={makePointSquare(point, index === 0 ? 0.00008 : 0.00006)}
           />
         ))}
+        {cropStrips.map((strip) => (
+          <Polygon
+            key={strip.name}
+            interactive={false}
+            pathOptions={{
+              color: strip.color,
+              fillColor: strip.color,
+              fillOpacity: 0.08,
+              opacity: 0.96,
+              weight: 2.5,
+            }}
+            positions={strip.positions}
+          />
+        ))}
         <CoordinatePicker onPick={setCoordinate} />
         <MapReady />
       </MapContainer>
@@ -418,6 +502,20 @@ function ZoneRow({
         <em>{area}</em>
       </span>
       <strong>{rate.toLocaleString()}</strong>
+    </div>
+  )
+}
+
+function CropStripRow({ strip }: { strip: CropStrip }) {
+  return (
+    <div className="crop-strip-row">
+      <i style={{ background: strip.color }} />
+      <span>
+        <b>{strip.crop}</b>
+        <em>
+          {strip.name} · {strip.area}
+        </em>
+      </span>
     </div>
   )
 }
