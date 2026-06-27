@@ -1,17 +1,14 @@
 import { useState } from 'react'
+import { Button, Card, FormGroup, HTMLSelect, NumericInput, Switch } from '@blueprintjs/core'
 import {
   CalendarDays,
-  ChevronDown,
-  ChevronLeft,
   ChevronRight,
   Cloud,
-  Download,
   Grid2X2,
   Headphones,
   Layers3,
   Leaf,
   MapPinned,
-  PenLine,
   Radar,
   Settings2,
   Sprout,
@@ -21,6 +18,8 @@ import {
   Waves,
 } from 'lucide-react'
 import { MapContainer, Polygon, TileLayer, Tooltip, useMap, useMapEvents } from 'react-leaflet'
+import '@blueprintjs/core/lib/css/blueprint.css'
+import '@blueprintjs/icons/lib/css/blueprint-icons.css'
 import 'leaflet/dist/leaflet.css'
 import './App.css'
 
@@ -327,6 +326,7 @@ function App() {
   const [activeView, setActiveView] = useState<ViewMode>('productivity')
   const [coordinate, setCoordinate] = useState<[number, number] | null>(null)
   const [hoveredCell, setHoveredCell] = useState<RasterCell | null>(null)
+  const [showSamplingPoints, setShowSamplingPoints] = useState(true)
   const [menuOpen, setMenuOpen] = useState(true)
   const [zoneCount, setZoneCount] = useState(3)
   const [standardRate, setStandardRate] = useState(70000)
@@ -352,16 +352,16 @@ function App() {
 
         <section className="config-panel">
           <header className="config-header">
-            <button type="button">← Back</button>
+            <Button minimal small icon="arrow-left" text="Back" />
             <span>User Guide</span>
-            <button
+            <Button
               className="hide-menu-button"
-              type="button"
+              icon="chevron-left"
+              minimal
+              small
               onClick={() => setMenuOpen(false)}
               aria-label="Hide menu"
-            >
-              <ChevronLeft size={17} />
-            </button>
+            />
           </header>
 
           <section className="config-title">
@@ -389,43 +389,51 @@ function App() {
             </div>
           </section>
 
-          <section className={`config-group crop-layout-group ${activeView === 'crop' ? 'is-active' : ''}`}>
+          <Card className={`config-card crop-layout-group ${activeView === 'crop' ? 'is-active' : ''}`} elevation={0}>
             <h2>Crop layout</h2>
             {cropStrips.map((strip) => (
               <CropStripRow key={strip.name} strip={strip} />
             ))}
-          </section>
+          </Card>
 
           <section className="config-group">
             <h2>Planting</h2>
-            <div className="select-line">
-              <span>Wheat soft, winter</span>
-              <ChevronDown size={17} />
+            <FormGroup label="Crop" labelFor="crop-select">
+              <HTMLSelect id="crop-select" fill options={['Wheat soft, winter', 'Rapeseed', 'Sugar beet', 'Potato']} />
+            </FormGroup>
+            <FormGroup label="Variety" labelFor="variety-select">
+              <HTMLSelect id="variety-select" fill options={['CP30', 'Chevignon', 'KWS Extase', 'LG Absalon']} />
+            </FormGroup>
+            <div className="bp-input-grid">
+              <FormGroup label="Standard rate" labelFor="rate-input">
+                <NumericInput
+                  id="rate-input"
+                  fill
+                  min={0}
+                  stepSize={1000}
+                  majorStepSize={5000}
+                  value={standardRate}
+                  onValueChange={(value) => setStandardRate(value || 0)}
+                  rightElement={<span className="input-unit">seeds/ha</span>}
+                />
+              </FormGroup>
+              <FormGroup label="Input zones" labelFor="zones-input">
+                <NumericInput
+                  id="zones-input"
+                  fill
+                  min={2}
+                  max={5}
+                  value={zoneCount}
+                  onValueChange={(value) => setZoneCount(value || 2)}
+                  rightElement={<span className="input-unit">zones</span>}
+                />
+              </FormGroup>
             </div>
-            <div className="select-line">
-              <span>CP30</span>
-              <ChevronDown size={17} />
-            </div>
-            <label className="input-line">
-              <span>Standard rate</span>
-              <input
-                type="number"
-                value={standardRate}
-                onChange={(event) => setStandardRate(Number(event.target.value))}
-              />
-              <em>seeds/ha</em>
-            </label>
-            <label className="input-line">
-              <span>Input zones</span>
-              <input
-                max={5}
-                min={2}
-                type="number"
-                value={zoneCount}
-                onChange={(event) => setZoneCount(Number(event.target.value))}
-              />
-              <em>zones</em>
-            </label>
+            <Switch
+              checked={showSamplingPoints}
+              label="Sampling points"
+              onChange={() => setShowSamplingPoints((current) => !current)}
+            />
           </section>
 
           <section className="config-group zones-group">
@@ -467,14 +475,8 @@ function App() {
           </section>
 
           <footer className="config-actions">
-            <button className="ghost-action" type="button">
-              <PenLine size={16} />
-              Edit
-            </button>
-            <button className="primary-action" type="button">
-              <Download size={16} />
-              Export map
-            </button>
+            <Button className="ghost-action" icon="edit" text="Edit" />
+            <Button className="primary-action" icon="download" text="Export map" />
           </footer>
         </section>
       </aside>
@@ -574,7 +576,7 @@ function App() {
           }}
           positions={farmFrontier}
         />
-        {analysisPoints.map((point, index) => (
+        {showSamplingPoints && analysisPoints.map((point, index) => (
           <Polygon
             key={`${point[0]}-${point[1]}`}
             interactive={false}
