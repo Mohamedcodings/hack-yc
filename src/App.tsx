@@ -1,4 +1,21 @@
 import { useState } from 'react'
+import {
+  CalendarDays,
+  ChevronDown,
+  Cloud,
+  Download,
+  Grid2X2,
+  Headphones,
+  Layers3,
+  Leaf,
+  MapPinned,
+  PenLine,
+  Radar,
+  Settings2,
+  Sprout,
+  Tractor,
+  UploadCloud,
+} from 'lucide-react'
 import { MapContainer, Polygon, TileLayer, Tooltip, useMap, useMapEvents } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import './App.css'
@@ -129,9 +146,128 @@ function makePointSquare([lat, lng]: [number, number], size: number): [number, n
 function App() {
   const [coordinate, setCoordinate] = useState<[number, number] | null>(null)
   const [hoveredCell, setHoveredCell] = useState<RasterCell | null>(null)
+  const [zoneCount, setZoneCount] = useState(3)
+  const [standardRate, setStandardRate] = useState(70000)
 
   return (
     <main className="map-only">
+      <aside className="side-shell" aria-label="Prescription configuration">
+        <nav className="icon-rail" aria-label="Product navigation">
+          <button className="brand-button" type="button" aria-label="Demeter">
+            <Sprout size={23} />
+          </button>
+          {[CalendarDays, Grid2X2, Radar, MapPinned, UploadCloud, Layers3, Tractor, Cloud].map(
+            (Icon, index) => (
+              <button className={index === 1 ? 'active' : ''} type="button" key={index}>
+                <Icon size={20} />
+              </button>
+            ),
+          )}
+          <button type="button" aria-label="Support">
+            <Headphones size={20} />
+          </button>
+        </nav>
+
+        <section className="config-panel">
+          <header className="config-header">
+            <button type="button">← Back</button>
+            <span>User Guide</span>
+          </header>
+
+          <section className="config-title">
+            <h1>Prescription map</h1>
+            <p>OSKI, 26.3 ha</p>
+          </section>
+
+          <section className="config-group">
+            <h2>Map settings</h2>
+            <SettingRow icon={Sprout} label="Planting" />
+            <SettingRow icon={Radar} label="Productivity map" />
+            <SettingRow icon={Grid2X2} label={`${zoneCount} zones`} />
+          </section>
+
+          <section className="config-group">
+            <h2>Planting</h2>
+            <div className="select-line">
+              <span>Wheat soft, winter</span>
+              <ChevronDown size={17} />
+            </div>
+            <div className="select-line">
+              <span>CP30</span>
+              <ChevronDown size={17} />
+            </div>
+            <label className="input-line">
+              <span>Standard rate</span>
+              <input
+                type="number"
+                value={standardRate}
+                onChange={(event) => setStandardRate(Number(event.target.value))}
+              />
+              <em>seeds/ha</em>
+            </label>
+            <label className="input-line">
+              <span>Input zones</span>
+              <input
+                max={5}
+                min={2}
+                type="number"
+                value={zoneCount}
+                onChange={(event) => setZoneCount(Number(event.target.value))}
+              />
+              <em>zones</em>
+            </label>
+          </section>
+
+          <section className="config-group zones-group">
+            <h2>Productivity-based zone</h2>
+            <ZoneRow color="#c75b2c" name="Zone 1" area="5.7 ha (22%)" rate={standardRate + 6000} />
+            <ZoneRow color="#d4b536" name="Zone 2" area="14.2 ha (54%)" rate={standardRate} />
+            <ZoneRow color="#2c9c45" name="Zone 3" area="6.4 ha (24%)" rate={standardRate - 6000} />
+          </section>
+
+          <section className="config-group trial-card">
+            <h2>Trial</h2>
+            <SettingRow icon={Sprout} label="Planting, PLAN1" />
+            <SettingRow icon={Leaf} label="Test A/B line, 112°" />
+            <SettingRow icon={Settings2} label="2 perpendicular strips, 98m" />
+          </section>
+
+          <section className="config-group cell-readout">
+            {hoveredCell ? (
+              <>
+                <h2>{hoveredCell.label}</h2>
+                <DataRow label="NDVI" value={hoveredCell.ndvi.toFixed(2)} />
+                <DataRow
+                  label="NDMI"
+                  value={`${hoveredCell.ndmi > 0 ? '+' : ''}${hoveredCell.ndmi.toFixed(2)}`}
+                />
+                <DataRow
+                  label="Thermal"
+                  value={`${hoveredCell.thermal > 0 ? '+' : ''}${hoveredCell.thermal.toFixed(1)}°C`}
+                />
+                <DataRow label="Rate" value={hoveredCell.rate} />
+              </>
+            ) : (
+              <>
+                <h2>Cell analytics</h2>
+                <p>Hover a cube to inspect satellite-derived values.</p>
+              </>
+            )}
+          </section>
+
+          <footer className="config-actions">
+            <button className="ghost-action" type="button">
+              <PenLine size={16} />
+              Edit
+            </button>
+            <button className="primary-action" type="button">
+              <Download size={16} />
+              Export map
+            </button>
+          </footer>
+        </section>
+      </aside>
+
       <div className="coordinate-readout">
         {coordinate
           ? `${coordinate[0].toFixed(6)}, ${coordinate[1].toFixed(6)}`
@@ -155,43 +291,6 @@ function App() {
             <dd>14.2 ha</dd>
           </div>
         </dl>
-      </aside>
-      <aside className={`cell-inspector ${hoveredCell ? 'visible' : ''}`}>
-        {hoveredCell ? (
-          <>
-            <strong>{hoveredCell.label}</strong>
-            <span>Hovered cube analytics</span>
-            <dl>
-              <div>
-                <dt>NDVI</dt>
-                <dd>{hoveredCell.ndvi.toFixed(2)}</dd>
-              </div>
-              <div>
-                <dt>NDMI</dt>
-                <dd>
-                  {hoveredCell.ndmi > 0 ? '+' : ''}
-                  {hoveredCell.ndmi.toFixed(2)}
-                </dd>
-              </div>
-              <div>
-                <dt>Thermal stress</dt>
-                <dd>
-                  {hoveredCell.thermal > 0 ? '+' : ''}
-                  {hoveredCell.thermal.toFixed(1)}°C
-                </dd>
-              </div>
-              <div>
-                <dt>Prescription</dt>
-                <dd>{hoveredCell.rate}</dd>
-              </div>
-            </dl>
-          </>
-        ) : (
-          <>
-            <strong>Hover a cube</strong>
-            <span>Cell analytics will appear here</span>
-          </>
-        )}
       </aside>
       <MapContainer
         center={farmCenter}
@@ -265,6 +364,47 @@ function App() {
         <MapReady />
       </MapContainer>
     </main>
+  )
+}
+
+function SettingRow({ icon: Icon, label }: { icon: typeof Sprout; label: string }) {
+  return (
+    <div className="setting-row">
+      <Icon size={16} />
+      <span>{label}</span>
+    </div>
+  )
+}
+
+function ZoneRow({
+  area,
+  color,
+  name,
+  rate,
+}: {
+  area: string
+  color: string
+  name: string
+  rate: number
+}) {
+  return (
+    <div className="zone-row">
+      <i style={{ background: color }} />
+      <span>
+        <b>{name}</b>
+        <em>{area}</em>
+      </span>
+      <strong>{rate.toLocaleString()}</strong>
+    </div>
+  )
+}
+
+function DataRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="data-row">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
   )
 }
 
