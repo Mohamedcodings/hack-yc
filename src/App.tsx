@@ -2,6 +2,8 @@ import { useState } from 'react'
 import {
   CalendarDays,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Cloud,
   Download,
   Grid2X2,
@@ -146,12 +148,13 @@ function makePointSquare([lat, lng]: [number, number], size: number): [number, n
 function App() {
   const [coordinate, setCoordinate] = useState<[number, number] | null>(null)
   const [hoveredCell, setHoveredCell] = useState<RasterCell | null>(null)
+  const [menuOpen, setMenuOpen] = useState(true)
   const [zoneCount, setZoneCount] = useState(3)
   const [standardRate, setStandardRate] = useState(70000)
 
   return (
     <main className="map-only">
-      <aside className="side-shell" aria-label="Prescription configuration">
+      <aside className={`side-shell ${menuOpen ? 'open' : 'closed'}`} aria-label="Prescription configuration">
         <nav className="icon-rail" aria-label="Product navigation">
           <button className="brand-button" type="button" aria-label="Demeter">
             <Sprout size={23} />
@@ -172,6 +175,14 @@ function App() {
           <header className="config-header">
             <button type="button">← Back</button>
             <span>User Guide</span>
+            <button
+              className="hide-menu-button"
+              type="button"
+              onClick={() => setMenuOpen(false)}
+              aria-label="Hide menu"
+            >
+              <ChevronLeft size={17} />
+            </button>
           </header>
 
           <section className="config-title">
@@ -267,6 +278,18 @@ function App() {
           </footer>
         </section>
       </aside>
+
+      {!menuOpen && (
+        <button
+          className="show-menu-button"
+          type="button"
+          onClick={() => setMenuOpen(true)}
+          aria-label="Show menu"
+        >
+          <ChevronRight size={18} />
+          Configure
+        </button>
+      )}
 
       <div className="coordinate-readout">
         {coordinate
