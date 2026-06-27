@@ -15,8 +15,10 @@ import {
   Radar,
   Settings2,
   Sprout,
+  ThermometerSun,
   Tractor,
   UploadCloud,
+  Waves,
 } from 'lucide-react'
 import { MapContainer, Polygon, TileLayer, Tooltip, useMap, useMapEvents } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
@@ -51,6 +53,8 @@ type RasterCell = {
   rate: string
   thermal: number
 }
+
+type ViewMode = 'crop' | 'productivity' | 'moisture' | 'thermal' | 'prescription'
 
 type CropStrip = {
   area: string
@@ -179,6 +183,72 @@ const analysisPoints: [number, number][] = [
   [50.2517, 2.74955],
 ]
 
+const viewModes: {
+  description: string
+  icon: typeof Sprout
+  id: ViewMode
+  label: string
+}[] = [
+  {
+    id: 'productivity',
+    icon: Radar,
+    label: 'Productivity map',
+    description: 'NDVI signal from satellite vegetation index',
+  },
+  {
+    id: 'moisture',
+    icon: Waves,
+    label: 'Moisture map',
+    description: 'NDMI-based water retention and dry pockets',
+  },
+  {
+    id: 'thermal',
+    icon: ThermometerSun,
+    label: 'Thermal stress',
+    description: 'Canopy heat anomaly and stress pressure',
+  },
+  {
+    id: 'prescription',
+    icon: Sprout,
+    label: 'Prescription rate',
+    description: 'Recommended variable-rate seeding zones',
+  },
+  {
+    id: 'crop',
+    icon: Layers3,
+    label: 'Crop layout',
+    description: 'Planned crop strips inside the farm frontier',
+  },
+]
+
+const viewMeta: Record<ViewMode, { legend: string; metric: string; title: string }> = {
+  crop: {
+    title: 'Crop layout',
+    legend: 'Farm crop plan',
+    metric: 'Crop strips',
+  },
+  productivity: {
+    title: 'Productivity map',
+    legend: 'NDVI vegetation vigor',
+    metric: 'Mean NDVI',
+  },
+  moisture: {
+    title: 'Moisture map',
+    legend: 'NDMI soil/canopy water',
+    metric: 'Moisture variance',
+  },
+  thermal: {
+    title: 'Thermal stress',
+    legend: 'Canopy heat anomaly',
+    metric: 'Stress pixels',
+  },
+  prescription: {
+    title: 'Prescription rate',
+    legend: 'Variable seeding rate',
+    metric: 'Seed rate delta',
+  },
+}
+
 function isInsideFarm(point: [number, number]) {
   const [lat, lng] = point
   let inside = false
@@ -207,7 +277,54 @@ function makePointSquare([lat, lng]: [number, number], size: number): [number, n
   ]
 }
 
+function getCellStyle(cell: RasterCell, activeView: ViewMode) {
+  if (activeView === 'moisture') {
+    const moisture = (cell.ndmi + 0.22) / 0.54
+    return {
+      color: moisture > 0.66 ? '#1c8ec9' : moisture > 0.45 ? '#5ab1cf' : '#d7a33a',
+      opacity: 0.68,
+    }
+  }
+
+  if (activeView === 'thermal') {
+    return {
+      color: cell.thermal > 1 ? '#d9562f' : cell.thermal > 0.2 ? '#e0bd35' : '#149a5a',
+      opacity: 0.7,
+    }
+  }
+
+  if (activeView === 'prescription') {
+    const rate = Number.parseInt(cell.rate, 10)
+    return {
+      color: rate >= 76 ? '#8b4bb2' : rate >= 70 ? '#c979be' : '#ead8f0',
+      opacity: 0.72,
+    }
+  }
+
+  return {
+    color: cell.color,
+    opacity: activeView === 'crop' ? 0.18 : cell.opacity,
+  }
+}
+
+function getCellPrimaryValue(cell: RasterCell, activeView: ViewMode) {
+  if (activeView === 'moisture') {
+    return `${cell.ndmi > 0 ? '+' : ''}${cell.ndmi.toFixed(2)} NDMI`
+  }
+
+  if (activeView === 'thermal') {
+    return `${cell.thermal > 0 ? '+' : ''}${cell.thermal.toFixed(1)}°C`
+  }
+
+  if (activeView === 'prescription') {
+    return cell.rate
+  }
+
+  return `${cell.ndvi.toFixed(2)} NDVI`
+}
+
 function App() {
+  const [activeView, setActiveView] = useState<ViewMode>('productivity')
   const [coordinate, setCoordinate] = useState<[number, number] | null>(null)
   const [hoveredCell, setHoveredCell] = useState<RasterCell | null>(null)
   const [menuOpen, setMenuOpen] = useState(true)
@@ -248,19 +365,31 @@ function App() {
           </header>
 
           <section className="config-title">
-            <h1>Prescription map</h1>
-            <p>OSKI, 26.3 ha</p>
+            <h1>{viewMeta[activeView].title}</h1>
+            <p>OSKI, 26.3 ha · North France</p>
           </section>
 
           <section className="config-group">
             <h2>Map settings</h2>
-            <SettingRow icon={Sprout} label="Planting" />
-            <SettingRow icon={Radar} label="Productivity map" />
-            <SettingRow icon={Layers3} label="Crop layout" />
-            <SettingRow icon={Grid2X2} label={`${zoneCount} zones`} />
+            <div className="view-picker">
+              {viewModes.map((view) => (
+                <button
+                  className={activeView === view.id ? 'active' : ''}
+                  key={view.id}
+                  type="button"
+                  onClick={() => setActiveView(view.id)}
+                >
+                  <view.icon size={17} />
+                  <span>
+                    <b>{view.label}</b>
+                    <em>{view.description}</em>
+                  </span>
+                </button>
+              ))}
+            </div>
           </section>
 
-          <section className="config-group crop-layout-group">
+          <section className={`config-group crop-layout-group ${activeView === 'crop' ? 'is-active' : ''}`}>
             <h2>Crop layout</h2>
             {cropStrips.map((strip) => (
               <CropStripRow key={strip.name} strip={strip} />
@@ -300,7 +429,7 @@ function App() {
           </section>
 
           <section className="config-group zones-group">
-            <h2>Productivity-based zone</h2>
+            <h2>{activeView === 'prescription' ? 'Prescription zones' : 'Productivity-based zone'}</h2>
             <ZoneRow color="#c75b2c" name="Zone 1" area="5.7 ha (22%)" rate={standardRate + 6000} />
             <ZoneRow color="#d4b536" name="Zone 2" area="14.2 ha (54%)" rate={standardRate} />
             <ZoneRow color="#2c9c45" name="Zone 3" area="6.4 ha (24%)" rate={standardRate - 6000} />
@@ -317,6 +446,7 @@ function App() {
             {hoveredCell ? (
               <>
                 <h2>{hoveredCell.label}</h2>
+                <DataRow label={viewMeta[activeView].metric} value={getCellPrimaryValue(hoveredCell, activeView)} />
                 <DataRow label="NDVI" value={hoveredCell.ndvi.toFixed(2)} />
                 <DataRow
                   label="NDMI"
@@ -367,21 +497,21 @@ function App() {
           : 'Click map to get coordinates'}
       </div>
       <aside className="model-legend">
-        <strong>Satellite agronomy model</strong>
-        <span>NDVI · NDMI · thermal stress</span>
-        <div className="legend-ramp" />
+        <strong>{viewMeta[activeView].legend}</strong>
+        <span>{activeView === 'crop' ? 'Farmer-defined crop zones' : 'Satellite agronomy model · 10m grid'}</span>
+        <div className={`legend-ramp ${activeView}`} />
         <dl>
           <div>
-            <dt>Mean NDVI</dt>
-            <dd>0.61</dd>
+            <dt>{viewMeta[activeView].metric}</dt>
+            <dd>{activeView === 'crop' ? '4 crops' : activeView === 'thermal' ? '14.2 ha' : activeView === 'moisture' ? '18%' : '0.61'}</dd>
           </div>
           <div>
-            <dt>Moisture variance</dt>
-            <dd>18%</dd>
+            <dt>Last capture</dt>
+            <dd>Sentinel-2</dd>
           </div>
           <div>
-            <dt>Stress pixels</dt>
-            <dd>14.2 ha</dd>
+            <dt>Confidence</dt>
+            <dd>92%</dd>
           </div>
         </dl>
       </aside>
@@ -403,7 +533,10 @@ function App() {
           url="https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
           opacity={0.12}
         />
-        {rasterCells.map((cell) => (
+        {activeView !== 'crop' && rasterCells.map((cell) => {
+          const style = getCellStyle(cell, activeView)
+
+          return (
           <Polygon
             key={cell.id}
             eventHandlers={{
@@ -413,8 +546,8 @@ function App() {
             }}
             pathOptions={{
               color: 'rgba(255,255,255,0.14)',
-              fillColor: cell.color,
-              fillOpacity: cell.opacity,
+              fillColor: style.color,
+              fillOpacity: style.opacity,
               opacity: 0.2,
               weight: 0.55,
             }}
@@ -422,13 +555,15 @@ function App() {
           >
             <Tooltip sticky opacity={0.96} className="cube-tooltip">
               <strong>{cell.label}</strong>
+              <span>{viewMeta[activeView].metric} {getCellPrimaryValue(cell, activeView)}</span>
               <span>NDVI {cell.ndvi.toFixed(2)}</span>
               <span>NDMI {cell.ndmi > 0 ? '+' : ''}{cell.ndmi.toFixed(2)}</span>
               <span>Thermal {cell.thermal > 0 ? '+' : ''}{cell.thermal.toFixed(1)}°C</span>
               <b>{cell.rate}</b>
             </Tooltip>
           </Polygon>
-        ))}
+          )
+        })}
         <Polygon
           interactive={false}
           pathOptions={{
@@ -456,16 +591,25 @@ function App() {
         {cropStrips.map((strip) => (
           <Polygon
             key={strip.name}
-            interactive={false}
+            interactive={activeView === 'crop'}
             pathOptions={{
               color: strip.color,
               fillColor: strip.color,
-              fillOpacity: 0.08,
+              fillOpacity: activeView === 'crop' ? 0.28 : 0.08,
               opacity: 0.96,
-              weight: 2.5,
+              weight: activeView === 'crop' ? 3.2 : 2.5,
             }}
             positions={strip.positions}
-          />
+          >
+            {activeView === 'crop' && (
+              <Tooltip sticky opacity={0.96} className="cube-tooltip">
+                <strong>{strip.crop}</strong>
+                <span>{strip.name}</span>
+                <span>{strip.area}</span>
+                <b>Crop zone</b>
+              </Tooltip>
+            )}
+          </Polygon>
         ))}
         <CoordinatePicker onPick={setCoordinate} />
         <MapReady />
