@@ -1,20 +1,14 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button, Card, FormGroup, HTMLSelect, NumericInput, Switch } from '@blueprintjs/core'
 import {
-  CalendarDays,
   ChevronRight,
-  Cloud,
   Grid2X2,
-  Headphones,
   Layers3,
-  Leaf,
-  MapPinned,
   Radar,
-  Settings2,
+  Send,
+  Sparkles,
   Sprout,
   ThermometerSun,
-  Tractor,
-  UploadCloud,
   Waves,
 } from 'lucide-react'
 import { MapContainer, Polygon, TileLayer, Tooltip, useMap, useMapEvents } from 'react-leaflet'
@@ -54,6 +48,8 @@ type RasterCell = {
 }
 
 type ViewMode = 'crop' | 'productivity' | 'moisture' | 'thermal' | 'prescription'
+type MenuPage = 'config' | 'agent'
+type DemoStage = 'login' | 'loading' | 'ready'
 
 type CropStrip = {
   area: string
@@ -61,6 +57,20 @@ type CropStrip = {
   crop: string
   name: string
   positions: [number, number][]
+}
+
+type ZoneAnalysis = {
+  message: string
+  recommendation: string
+  risk: 'Low' | 'Medium' | 'High'
+  title: string
+}
+
+type PlaygroundMessage = {
+  id: string
+  pending?: boolean
+  role: 'agent' | 'farmer'
+  text: string
 }
 
 const cropStrips: CropStrip[] = [
@@ -248,6 +258,14 @@ const viewMeta: Record<ViewMode, { legend: string; metric: string; title: string
   },
 }
 
+const loadingSteps = [
+  'Loading context',
+  'Loading ontologies',
+  'Loading satellite map',
+  'Indexing farm zones',
+  'Opening workspace',
+]
+
 function isInsideFarm(point: [number, number]) {
   const [lat, lng] = point
   let inside = false
@@ -281,14 +299,14 @@ function getCellStyle(cell: RasterCell, activeView: ViewMode) {
     const moisture = (cell.ndmi + 0.22) / 0.54
     return {
       color: moisture > 0.66 ? '#1c8ec9' : moisture > 0.45 ? '#5ab1cf' : '#d7a33a',
-      opacity: 0.68,
+      opacity: 0.54,
     }
   }
 
   if (activeView === 'thermal') {
     return {
       color: cell.thermal > 1 ? '#d9562f' : cell.thermal > 0.2 ? '#e0bd35' : '#149a5a',
-      opacity: 0.7,
+      opacity: 0.56,
     }
   }
 
@@ -296,13 +314,13 @@ function getCellStyle(cell: RasterCell, activeView: ViewMode) {
     const rate = Number.parseInt(cell.rate, 10)
     return {
       color: rate >= 76 ? '#8b4bb2' : rate >= 70 ? '#c979be' : '#ead8f0',
-      opacity: 0.72,
+      opacity: 0.58,
     }
   }
 
   return {
     color: cell.color,
-    opacity: activeView === 'crop' ? 0.18 : cell.opacity,
+    opacity: activeView === 'crop' ? 0.18 : 0.52,
   }
 }
 
@@ -322,14 +340,486 @@ function getCellPrimaryValue(cell: RasterCell, activeView: ViewMode) {
   return `${cell.ndvi.toFixed(2)} NDVI`
 }
 
+function getCellCenter(cell: RasterCell): [number, number] {
+  const lat = cell.positions.reduce((sum, point) => sum + point[0], 0) / cell.positions.length
+  const lng = cell.positions.reduce((sum, point) => sum + point[1], 0) / cell.positions.length
+
+  return [lat, lng]
+}
+
+function formatCoordinate([lat, lng]: [number, number]) {
+  return `${lat.toFixed(6)}, ${lng.toFixed(6)}`
+}
+
+function parseCoordinate(message: string): [number, number] | null {
+  const match = message.match(/(-?\d+(?:\.\d+)?)\s*[,;]\s*(-?\d+(?:\.\d+)?)/)
+
+  if (!match) {
+    return null
+  }
+
+  const lat = Number(match[1])
+  const lng = Number(match[2])
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return null
+  }
+
+  return [lat, lng]
+}
+
+function findNearestCell(coordinate: [number, number]) {
+  return rasterCells.reduce(
+    (closest, cell) => {
+      const center = getCellCenter(cell)
+      const distance = (coordinate[0] - center[0]) ** 2 + (coordinate[1] - center[1]) ** 2
+
+      return distance < closest.distance ? { cell, distance } : closest
+    },
+    { cell: rasterCells[0], distance: Number.POSITIVE_INFINITY },
+  ).cell
+}
+
+function fallbackCopyText(text: string) {
+  const textarea = document.createElement('textarea')
+
+  textarea.value = text
+  textarea.setAttribute('readonly', 'true')
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  document.body.appendChild(textarea)
+  textarea.select()
+  document.execCommand('copy')
+  document.body.removeChild(textarea)
+}
+
+function copyTextToClipboard(text: string) {
+  if (navigator.clipboard?.writeText) {
+    void navigator.clipboard.writeText(text).catch(() => fallbackCopyText(text))
+    return
+  }
+
+  fallbackCopyText(text)
+}
+
+function getZoneAnalysis(cell: RasterCell, activeView: ViewMode): ZoneAnalysis {
+  if (cell.ndvi < 0.42 || cell.thermal > 1.1) {
+    return {
+      title: 'I found a stressed pocket.',
+      message:
+        'This part of the field is weaker than the rest and warmer than expected. I would treat it as a possible water stress or compaction area, not as a generic crop problem.',
+      recommendation:
+        activeView === 'prescription'
+          ? 'Keep the higher seed rate only inside this pocket, then inspect before adding nitrogen.'
+          : 'Walk this zone first and compare soil moisture with the green band next to it.',
+      risk: 'High',
+    }
+  }
+
+  if (cell.ndmi < -0.02 || cell.ndvi < 0.58) {
+    return {
+      title: 'This zone needs watching.',
+      message:
+        'The crop is not failing, but the moisture signal is below the field baseline. I would not overreact yet; this looks like lighter soil or drainage variation.',
+      recommendation:
+        'Keep the current plan, watch this area after the next image, and add one sampling point if the yellow area expands.',
+      risk: 'Medium',
+    }
+  }
+
+  return {
+    title: 'This area looks healthy.',
+    message:
+      'The vegetation and moisture signals are aligned here. I would use this zone as your benchmark for the rest of the field.',
+    recommendation:
+      activeView === 'prescription'
+        ? 'You can hold or slightly reduce the rate here and move budget toward weaker cells.'
+        : 'No immediate action needed. Keep this as a comparison zone when scouting.',
+    risk: 'Low',
+  }
+}
+
+function buildFarmContext(selectedCell: RasterCell | null, activeView: ViewMode, copiedCoordinate: string | null) {
+  const selectedAnalysis = selectedCell ? getZoneAnalysis(selectedCell, activeView) : null
+  const selectedCenter = selectedCell ? formatCoordinate(getCellCenter(selectedCell)) : null
+
+  return {
+    activeView,
+    copiedCoordinate,
+    farm: {
+      location: 'North France, near Arras',
+      area: '26.3 ha',
+      frontier: farmFrontier.map(formatCoordinate),
+    },
+    cropPlan: cropStrips.map((strip) => ({
+      area: strip.area,
+      crop: strip.crop,
+      name: strip.name,
+    })),
+    selectedZone: selectedCell
+      ? {
+          coordinate: selectedCenter,
+          label: selectedCell.label,
+          ndvi: Number(selectedCell.ndvi.toFixed(2)),
+          ndmi: Number(selectedCell.ndmi.toFixed(2)),
+          thermalAnomalyC: selectedCell.thermal,
+          primaryValue: getCellPrimaryValue(selectedCell, activeView),
+          prescriptionRate: selectedCell.rate,
+          risk: selectedAnalysis?.risk,
+          localModelRead: selectedAnalysis?.message,
+        }
+      : null,
+  }
+}
+
+function extractOpenAIText(payload: unknown) {
+  if (
+    payload &&
+    typeof payload === 'object' &&
+    'output_text' in payload &&
+    typeof (payload as { output_text?: unknown }).output_text === 'string'
+  ) {
+    return (payload as { output_text: string }).output_text
+  }
+
+  if (!payload || typeof payload !== 'object' || !('output' in payload)) {
+    return null
+  }
+
+  const output = (payload as { output?: unknown }).output
+
+  if (!Array.isArray(output)) {
+    return null
+  }
+
+  return output
+    .flatMap((item) => {
+      if (!item || typeof item !== 'object' || !('content' in item)) {
+        return []
+      }
+
+      const content = (item as { content?: unknown }).content
+
+      if (!Array.isArray(content)) {
+        return []
+      }
+
+      return content.flatMap((part) => {
+        if (!part || typeof part !== 'object' || !('text' in part)) {
+          return []
+        }
+
+        const text = (part as { text?: unknown }).text
+        return typeof text === 'string' ? [text] : []
+      })
+    })
+    .join('\n')
+    .trim()
+}
+
+async function askOpenAIAgent({
+  activeView,
+  copiedCoordinate,
+  messages,
+  question,
+  selectedCell,
+}: {
+  activeView: ViewMode
+  copiedCoordinate: string | null
+  messages: PlaygroundMessage[]
+  question: string
+  selectedCell: RasterCell | null
+}) {
+  const apiKey = import.meta.env.VITE_OPENAI_API_KEY
+
+  if (!apiKey) {
+    throw new Error('Missing VITE_OPENAI_API_KEY in .env.local')
+  }
+
+  const recentMessages = messages.slice(-8).map((message) => ({
+    role: message.role === 'farmer' ? 'farmer' : 'agent',
+    text: message.text,
+  }))
+
+  const response = await fetch('https://api.openai.com/v1/responses', {
+    body: JSON.stringify({
+      input: [
+        {
+          content: [
+            {
+              text: `You are Demeter, a concise farm operating agent for a real satellite map demo. 
+Speak like an expert agronomist and product-grade farm assistant.
+Use the provided farm context and never pretend that live backend data exists.
+If the farmer pasted coordinates, treat them as the current place of interest.
+Keep answers short, operational, and specific: what you see, why it matters, what to do next.
+Avoid generic disclaimers, fake confidence scores, and long explanations.`,
+              type: 'input_text',
+            },
+          ],
+          role: 'system',
+        },
+        {
+          content: [
+            {
+              text: JSON.stringify(
+                {
+                  farmContext: buildFarmContext(selectedCell, activeView, copiedCoordinate),
+                  recentMessages,
+                  farmerQuestion: question,
+                },
+                null,
+                2,
+              ),
+              type: 'input_text',
+            },
+          ],
+          role: 'user',
+        },
+      ],
+      max_output_tokens: 260,
+      model: import.meta.env.VITE_OPENAI_MODEL || 'gpt-4.1-mini',
+    }),
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    method: 'POST',
+  })
+
+  if (!response.ok) {
+    throw new Error(`OpenAI request failed (${response.status})`)
+  }
+
+  const payload: unknown = await response.json()
+  const text = extractOpenAIText(payload)
+
+  if (!text) {
+    throw new Error('OpenAI returned no text')
+  }
+
+  return text
+}
+
 function App() {
+  const [demoStage, setDemoStage] = useState<DemoStage>('login')
+  const [loadingStep, setLoadingStep] = useState(0)
   const [activeView, setActiveView] = useState<ViewMode>('productivity')
-  const [coordinate, setCoordinate] = useState<[number, number] | null>(null)
-  const [hoveredCell, setHoveredCell] = useState<RasterCell | null>(null)
+  const [activeMenuPage, setActiveMenuPage] = useState<MenuPage>('config')
+  const [draftQuestion, setDraftQuestion] = useState('')
+  const [messages, setMessages] = useState<PlaygroundMessage[]>([
+    {
+      id: 'welcome',
+      role: 'agent',
+      text: 'Ask about the field, compare layers, or click a zone on the map.',
+    },
+  ])
+  const [selectedCell, setSelectedCell] = useState<RasterCell | null>(null)
+  const [copiedCoordinate, setCopiedCoordinate] = useState<string | null>(null)
   const [showSamplingPoints, setShowSamplingPoints] = useState(true)
   const [menuOpen, setMenuOpen] = useState(true)
   const [zoneCount, setZoneCount] = useState(3)
   const [standardRate, setStandardRate] = useState(70000)
+  const selectedAnalysis = selectedCell ? getZoneAnalysis(selectedCell, activeView) : null
+
+  useEffect(() => {
+    if (demoStage !== 'loading') {
+      return undefined
+    }
+
+    setLoadingStep(0)
+
+    const interval = window.setInterval(() => {
+      setLoadingStep((current) => {
+        if (current >= loadingSteps.length - 1) {
+          window.clearInterval(interval)
+          window.setTimeout(() => setDemoStage('ready'), 420)
+          return current
+        }
+
+        return current + 1
+      })
+    }, 620)
+
+    return () => window.clearInterval(interval)
+  }, [demoStage])
+
+  const askAgent = async (question: string) => {
+    const trimmed = question.trim()
+
+    if (!trimmed) {
+      return
+    }
+
+    const coordinate = parseCoordinate(trimmed)
+    const contextCell = coordinate ? findNearestCell(coordinate) : selectedCell
+
+    if (coordinate) {
+      setSelectedCell(contextCell)
+    }
+
+    const farmerMessage: PlaygroundMessage = {
+      id: `farmer-${Date.now()}`,
+      role: 'farmer',
+      text: trimmed,
+    }
+    const pendingId = `agent-${Date.now()}`
+    const pendingMessage: PlaygroundMessage = {
+      id: pendingId,
+      pending: true,
+      role: 'agent',
+      text: 'Thinking with the farm context...',
+    }
+    const nextMessages = [...messages, farmerMessage, pendingMessage]
+
+    setMessages((current) => [
+      ...current,
+      farmerMessage,
+      pendingMessage,
+    ])
+    setDraftQuestion('')
+
+    try {
+      const answer = await askOpenAIAgent({
+        activeView,
+        copiedCoordinate,
+        messages,
+        question: trimmed,
+        selectedCell: contextCell,
+      })
+
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === pendingId
+            ? {
+                ...message,
+                pending: false,
+                text: answer,
+              }
+            : message,
+        ),
+      )
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'OpenAI request failed'
+
+      setMessages(
+        nextMessages.map((item) =>
+          item.id === pendingId
+            ? {
+                ...item,
+                pending: false,
+                text: `${message}. Add VITE_OPENAI_API_KEY to .env.local, then restart the Vite server.`,
+              }
+            : item,
+        ),
+      )
+    }
+  }
+  const copyCoordinate = (coordinate: [number, number], cell?: RasterCell) => {
+    const formatted = formatCoordinate(coordinate)
+
+    setCopiedCoordinate(formatted)
+
+    if (cell) {
+      setSelectedCell(cell)
+    }
+
+    copyTextToClipboard(formatted)
+  }
+  const selectCell = (cell: RasterCell, coordinate?: [number, number]) => {
+    setSelectedCell(cell)
+    copyCoordinate(coordinate ?? getCellCenter(cell), cell)
+  }
+  const runAgentAction = (action: 'inspect' | 'moisture' | 'prescription' | 'task') => {
+    if (action === 'inspect') {
+      setActiveView('thermal')
+      void askAgent('Inspect weak zones on the thermal layer')
+      return
+    }
+
+    if (action === 'moisture') {
+      setActiveView('moisture')
+      void askAgent('Check moisture and tell me where to look')
+      return
+    }
+
+    if (action === 'prescription') {
+      setActiveView('prescription')
+      void askAgent('Show prescription recommendation for this farm')
+      return
+    }
+
+    void askAgent('Create a scouting task')
+  }
+
+  if (demoStage !== 'ready') {
+    return (
+      <main className="demo-entry">
+        <section className="demo-entry-panel">
+          <div className="demo-brand">
+            <span>
+              <Sprout size={26} />
+            </span>
+            <b>Demeter</b>
+          </div>
+
+          {demoStage === 'login' ? (
+            <form
+              className="demo-login-form"
+              onSubmit={(event) => {
+                event.preventDefault()
+                setDemoStage('loading')
+              }}
+            >
+              <div className="demo-copy">
+                <p>Farm workspace</p>
+                <h1>Log in to Demeter</h1>
+              </div>
+
+              <label className="demo-field">
+                <span>Email</span>
+                <input type="email" value="jean.martin@ferme-du-nord.fr" readOnly />
+              </label>
+              <label className="demo-field">
+                <span>Password</span>
+                <input type="password" value="demeter-demo" readOnly />
+              </label>
+              <label className="demo-field">
+                <span>Workspace</span>
+                <select value="north-france" readOnly>
+                  <option value="north-france">Ferme du Nord · 26.3 ha</option>
+                </select>
+              </label>
+
+              <div className="demo-login-row">
+                <label>
+                  <input type="checkbox" defaultChecked />
+                  Remember me
+                </label>
+                <button type="button">Forgot password?</button>
+              </div>
+
+              <button className="demo-login-button" type="submit">
+                Log in
+              </button>
+            </form>
+          ) : (
+            <div className="demo-loading">
+              <div className="demo-loader" aria-hidden="true" />
+              <p>Loading...</p>
+              <h1>{loadingSteps[loadingStep]}</h1>
+              <div className="demo-step-list">
+                {loadingSteps.map((step, index) => (
+                  <span className={index <= loadingStep ? 'complete' : ''} key={step}>
+                    {step}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+      </main>
+    )
+  }
 
   return (
     <main className="map-only">
@@ -338,22 +828,27 @@ function App() {
           <button className="brand-button" type="button" aria-label="Demeter">
             <Sprout size={23} />
           </button>
-          {[CalendarDays, Grid2X2, Radar, MapPinned, UploadCloud, Layers3, Tractor, Cloud].map(
-            (Icon, index) => (
-              <button className={index === 1 ? 'active' : ''} type="button" key={index}>
-                <Icon size={20} />
-              </button>
-            ),
-          )}
-          <button type="button" aria-label="Support">
-            <Headphones size={20} />
+          <button
+            className={activeMenuPage === 'config' ? 'active' : ''}
+            type="button"
+            aria-label="Configuration"
+            onClick={() => setActiveMenuPage('config')}
+          >
+            <Grid2X2 size={20} />
+          </button>
+          <button
+            className={activeMenuPage === 'agent' ? 'active' : ''}
+            type="button"
+            aria-label="Farm agent"
+            onClick={() => setActiveMenuPage('agent')}
+          >
+            <Sparkles size={20} />
           </button>
         </nav>
 
         <section className="config-panel">
           <header className="config-header">
-            <Button minimal small icon="arrow-left" text="Back" />
-            <span>User Guide</span>
+            <span>Demeter</span>
             <Button
               className="hide-menu-button"
               icon="chevron-left"
@@ -365,119 +860,153 @@ function App() {
           </header>
 
           <section className="config-title">
-            <h1>{viewMeta[activeView].title}</h1>
-            <p>OSKI, 26.3 ha · North France</p>
+            <h1>{activeMenuPage === 'agent' ? 'Farm agent' : viewMeta[activeView].title}</h1>
+            <p>{activeMenuPage === 'agent' ? 'Field context assistant' : '26.3 ha · North France'}</p>
           </section>
 
-          <section className="config-group">
-            <h2>Map settings</h2>
-            <div className="view-picker">
-              {viewModes.map((view) => (
-                <button
-                  className={activeView === view.id ? 'active' : ''}
-                  key={view.id}
-                  type="button"
-                  onClick={() => setActiveView(view.id)}
-                >
-                  <view.icon size={17} />
-                  <span>
-                    <b>{view.label}</b>
-                    <em>{view.description}</em>
-                  </span>
+          {activeMenuPage === 'config' ? (
+            <>
+              <section className="config-group">
+                <h2>Map settings</h2>
+                <div className="view-picker">
+                  {viewModes.map((view) => (
+                    <button
+                      className={activeView === view.id ? 'active' : ''}
+                      key={view.id}
+                      type="button"
+                      onClick={() => setActiveView(view.id)}
+                    >
+                      <view.icon size={17} />
+                      <span>
+                        <b>{view.label}</b>
+                        <em>{view.description}</em>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <Card
+                className={`config-card crop-layout-group ${activeView === 'crop' ? 'is-active' : ''}`}
+                elevation={0}
+              >
+                <h2>Crop layout</h2>
+                {cropStrips.map((strip) => (
+                  <CropStripRow key={strip.name} strip={strip} />
+                ))}
+              </Card>
+
+              <section className="config-group">
+                <h2>Planting</h2>
+                <FormGroup label="Crop" labelFor="crop-select">
+                  <HTMLSelect
+                    id="crop-select"
+                    fill
+                    options={['Wheat soft, winter', 'Rapeseed', 'Sugar beet', 'Potato']}
+                  />
+                </FormGroup>
+                <FormGroup label="Variety" labelFor="variety-select">
+                  <HTMLSelect id="variety-select" fill options={['CP30', 'Chevignon', 'KWS Extase', 'LG Absalon']} />
+                </FormGroup>
+                <div className="bp-input-grid">
+                  <FormGroup label="Standard rate" labelFor="rate-input">
+                    <NumericInput
+                      id="rate-input"
+                      fill
+                      min={0}
+                      stepSize={1000}
+                      majorStepSize={5000}
+                      value={standardRate}
+                      onValueChange={(value) => setStandardRate(value || 0)}
+                      rightElement={<span className="input-unit">seeds/ha</span>}
+                    />
+                  </FormGroup>
+                  <FormGroup label="Input zones" labelFor="zones-input">
+                    <NumericInput
+                      id="zones-input"
+                      fill
+                      min={2}
+                      max={5}
+                      value={zoneCount}
+                      onValueChange={(value) => setZoneCount(value || 2)}
+                      rightElement={<span className="input-unit">zones</span>}
+                    />
+                  </FormGroup>
+                </div>
+                <Switch
+                  checked={showSamplingPoints}
+                  label="Sampling points"
+                  onChange={() => setShowSamplingPoints((current) => !current)}
+                />
+              </section>
+
+              <footer className="config-actions">
+                <Button className="primary-action" icon="download" text="Export map" />
+              </footer>
+            </>
+          ) : (
+            <section className="farm-playground page">
+              <div className="playground-topline">
+                <span>
+                  {copiedCoordinate
+                    ? `Copied ${copiedCoordinate}`
+                    : 'Click the map to copy coordinates, then paste them here.'}
+                </span>
+                {selectedCell && selectedAnalysis && (
+                  <button type="button" onClick={() => setSelectedCell(null)}>
+                    <span className={`risk-pill ${selectedAnalysis.risk.toLowerCase()}`}>{selectedAnalysis.risk}</span>
+                    {getCellPrimaryValue(selectedCell, activeView)}
+                  </button>
+                )}
+              </div>
+              <div className="agent-actions">
+                <button type="button" onClick={() => runAgentAction('inspect')}>
+                  Inspect weak zones
                 </button>
-              ))}
-            </div>
-          </section>
-
-          <Card className={`config-card crop-layout-group ${activeView === 'crop' ? 'is-active' : ''}`} elevation={0}>
-            <h2>Crop layout</h2>
-            {cropStrips.map((strip) => (
-              <CropStripRow key={strip.name} strip={strip} />
-            ))}
-          </Card>
-
-          <section className="config-group">
-            <h2>Planting</h2>
-            <FormGroup label="Crop" labelFor="crop-select">
-              <HTMLSelect id="crop-select" fill options={['Wheat soft, winter', 'Rapeseed', 'Sugar beet', 'Potato']} />
-            </FormGroup>
-            <FormGroup label="Variety" labelFor="variety-select">
-              <HTMLSelect id="variety-select" fill options={['CP30', 'Chevignon', 'KWS Extase', 'LG Absalon']} />
-            </FormGroup>
-            <div className="bp-input-grid">
-              <FormGroup label="Standard rate" labelFor="rate-input">
-                <NumericInput
-                  id="rate-input"
-                  fill
-                  min={0}
-                  stepSize={1000}
-                  majorStepSize={5000}
-                  value={standardRate}
-                  onValueChange={(value) => setStandardRate(value || 0)}
-                  rightElement={<span className="input-unit">seeds/ha</span>}
+                <button type="button" onClick={() => runAgentAction('moisture')}>
+                  Check moisture
+                </button>
+                <button type="button" onClick={() => runAgentAction('prescription')}>
+                  Show prescription
+                </button>
+                <button type="button" onClick={() => runAgentAction('task')}>
+                  Create task
+                </button>
+              </div>
+              <div className="playground-thread">
+                {messages.map((message) => (
+                  <div className={`playground-message ${message.role} ${message.pending ? 'pending' : ''}`} key={message.id}>
+                    <span>{message.role === 'agent' ? 'Demeter' : 'You'}</span>
+                    <p>{message.text}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="playground-prompts">
+                {['What should I inspect today?', 'Why this zone?', 'Create a scouting task'].map((prompt) => (
+                  <button key={prompt} type="button" onClick={() => askAgent(prompt)}>
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+              <form
+                className="playground-composer"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  askAgent(draftQuestion)
+                }}
+              >
+                <input
+                  aria-label="Ask Demeter"
+                  placeholder="Ask about this farm..."
+                  value={draftQuestion}
+                  onChange={(event) => setDraftQuestion(event.target.value)}
                 />
-              </FormGroup>
-              <FormGroup label="Input zones" labelFor="zones-input">
-                <NumericInput
-                  id="zones-input"
-                  fill
-                  min={2}
-                  max={5}
-                  value={zoneCount}
-                  onValueChange={(value) => setZoneCount(value || 2)}
-                  rightElement={<span className="input-unit">zones</span>}
-                />
-              </FormGroup>
-            </div>
-            <Switch
-              checked={showSamplingPoints}
-              label="Sampling points"
-              onChange={() => setShowSamplingPoints((current) => !current)}
-            />
-          </section>
-
-          <section className="config-group zones-group">
-            <h2>{activeView === 'prescription' ? 'Prescription zones' : 'Productivity-based zone'}</h2>
-            <ZoneRow color="#c75b2c" name="Zone 1" area="5.7 ha (22%)" rate={standardRate + 6000} />
-            <ZoneRow color="#d4b536" name="Zone 2" area="14.2 ha (54%)" rate={standardRate} />
-            <ZoneRow color="#2c9c45" name="Zone 3" area="6.4 ha (24%)" rate={standardRate - 6000} />
-          </section>
-
-          <section className="config-group trial-card">
-            <h2>Trial</h2>
-            <SettingRow icon={Sprout} label="Planting, PLAN1" />
-            <SettingRow icon={Leaf} label="Test A/B line, 112°" />
-            <SettingRow icon={Settings2} label="2 perpendicular strips, 98m" />
-          </section>
-
-          <section className="config-group cell-readout">
-            {hoveredCell ? (
-              <>
-                <h2>{hoveredCell.label}</h2>
-                <DataRow label={viewMeta[activeView].metric} value={getCellPrimaryValue(hoveredCell, activeView)} />
-                <DataRow label="NDVI" value={hoveredCell.ndvi.toFixed(2)} />
-                <DataRow
-                  label="NDMI"
-                  value={`${hoveredCell.ndmi > 0 ? '+' : ''}${hoveredCell.ndmi.toFixed(2)}`}
-                />
-                <DataRow
-                  label="Thermal"
-                  value={`${hoveredCell.thermal > 0 ? '+' : ''}${hoveredCell.thermal.toFixed(1)}°C`}
-                />
-                <DataRow label="Rate" value={hoveredCell.rate} />
-              </>
-            ) : (
-              <>
-                <h2>Cell analytics</h2>
-                <p>Hover a cube to inspect satellite-derived values.</p>
-              </>
-            )}
-          </section>
-
-          <footer className="config-actions">
-            <Button className="ghost-action" icon="edit" text="Edit" />
-            <Button className="primary-action" icon="download" text="Export map" />
-          </footer>
+                <button type="submit" aria-label="Send question">
+                  <Send size={15} />
+                </button>
+              </form>
+            </section>
+          )}
         </section>
       </aside>
 
@@ -492,30 +1021,10 @@ function App() {
           Configure
         </button>
       )}
-
-      <div className="coordinate-readout">
-        {coordinate
-          ? `${coordinate[0].toFixed(6)}, ${coordinate[1].toFixed(6)}`
-          : 'Click map to get coordinates'}
-      </div>
       <aside className="model-legend">
         <strong>{viewMeta[activeView].legend}</strong>
-        <span>{activeView === 'crop' ? 'Farmer-defined crop zones' : 'Satellite agronomy model · 10m grid'}</span>
+        <span>{activeView === 'crop' ? 'Crop zones' : viewMeta[activeView].metric}</span>
         <div className={`legend-ramp ${activeView}`} />
-        <dl>
-          <div>
-            <dt>{viewMeta[activeView].metric}</dt>
-            <dd>{activeView === 'crop' ? '4 crops' : activeView === 'thermal' ? '14.2 ha' : activeView === 'moisture' ? '18%' : '0.61'}</dd>
-          </div>
-          <div>
-            <dt>Last capture</dt>
-            <dd>Sentinel-2</dd>
-          </div>
-          <div>
-            <dt>Confidence</dt>
-            <dd>92%</dd>
-          </div>
-        </dl>
       </aside>
       <MapContainer
         center={farmCenter}
@@ -537,26 +1046,28 @@ function App() {
         />
         {activeView !== 'crop' && rasterCells.map((cell) => {
           const style = getCellStyle(cell, activeView)
+          const isSelected = selectedCell?.id === cell.id
 
           return (
           <Polygon
             key={cell.id}
             eventHandlers={{
-              click: () => setHoveredCell(cell),
-              mouseout: () => setHoveredCell(null),
-              mouseover: () => setHoveredCell(cell),
+              click: (event) => {
+                selectCell(cell, [event.latlng.lat, event.latlng.lng])
+              },
             }}
             pathOptions={{
-              color: 'rgba(255,255,255,0.14)',
+              className: isSelected ? 'farm-cell selected' : 'farm-cell',
+              color: isSelected ? '#f8fff3' : 'rgba(255,255,255,0.08)',
               fillColor: style.color,
-              fillOpacity: style.opacity,
-              opacity: 0.2,
-              weight: 0.55,
+              fillOpacity: isSelected ? Math.min(style.opacity + 0.18, 0.78) : style.opacity,
+              opacity: isSelected ? 0.98 : 0.16,
+              weight: isSelected ? 2.2 : 0.32,
             }}
             positions={cell.positions}
           >
             <Tooltip sticky opacity={0.96} className="cube-tooltip">
-              <strong>{cell.label}</strong>
+              <strong>{isSelected ? 'Selected cell' : cell.label}</strong>
               <span>{viewMeta[activeView].metric} {getCellPrimaryValue(cell, activeView)}</span>
               <span>NDVI {cell.ndvi.toFixed(2)}</span>
               <span>NDMI {cell.ndmi > 0 ? '+' : ''}{cell.ndmi.toFixed(2)}</span>
@@ -590,65 +1101,31 @@ function App() {
             positions={makePointSquare(point, index === 0 ? 0.00008 : 0.00006)}
           />
         ))}
-        {cropStrips.map((strip) => (
+        {activeView === 'crop' && cropStrips.map((strip) => (
           <Polygon
             key={strip.name}
-            interactive={activeView === 'crop'}
+            interactive
             pathOptions={{
               color: strip.color,
               fillColor: strip.color,
-              fillOpacity: activeView === 'crop' ? 0.28 : 0.08,
+              fillOpacity: 0.28,
               opacity: 0.96,
-              weight: activeView === 'crop' ? 3.2 : 2.5,
+              weight: 3.2,
             }}
             positions={strip.positions}
           >
-            {activeView === 'crop' && (
-              <Tooltip sticky opacity={0.96} className="cube-tooltip">
-                <strong>{strip.crop}</strong>
-                <span>{strip.name}</span>
-                <span>{strip.area}</span>
-                <b>Crop zone</b>
-              </Tooltip>
-            )}
+            <Tooltip sticky opacity={0.96} className="cube-tooltip">
+              <strong>{strip.crop}</strong>
+              <span>{strip.name}</span>
+              <span>{strip.area}</span>
+              <b>Crop zone</b>
+            </Tooltip>
           </Polygon>
         ))}
-        <CoordinatePicker onPick={setCoordinate} />
+        <MapCoordinatePicker onPick={(coordinate) => copyCoordinate(coordinate)} />
         <MapReady />
       </MapContainer>
     </main>
-  )
-}
-
-function SettingRow({ icon: Icon, label }: { icon: typeof Sprout; label: string }) {
-  return (
-    <div className="setting-row">
-      <Icon size={16} />
-      <span>{label}</span>
-    </div>
-  )
-}
-
-function ZoneRow({
-  area,
-  color,
-  name,
-  rate,
-}: {
-  area: string
-  color: string
-  name: string
-  rate: number
-}) {
-  return (
-    <div className="zone-row">
-      <i style={{ background: color }} />
-      <span>
-        <b>{name}</b>
-        <em>{area}</em>
-      </span>
-      <strong>{rate.toLocaleString()}</strong>
-    </div>
   )
 }
 
@@ -666,16 +1143,7 @@ function CropStripRow({ strip }: { strip: CropStrip }) {
   )
 }
 
-function DataRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="data-row">
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  )
-}
-
-function CoordinatePicker({ onPick }: { onPick: (coordinate: [number, number]) => void }) {
+function MapCoordinatePicker({ onPick }: { onPick: (coordinate: [number, number]) => void }) {
   useMapEvents({
     click(event) {
       onPick([event.latlng.lat, event.latlng.lng])
