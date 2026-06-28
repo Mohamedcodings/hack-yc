@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Button, Card, FormGroup, HTMLSelect, NumericInput, Switch } from '@blueprintjs/core'
 import {
+  Camera,
   ChevronRight,
   Grid2X2,
   Layers3,
@@ -48,8 +49,9 @@ type RasterCell = {
 }
 
 type ViewMode = 'crop' | 'productivity' | 'moisture' | 'thermal' | 'prescription'
-type MenuPage = 'config' | 'agent'
+type MenuPage = 'config' | 'agent' | 'doctor'
 type DemoStage = 'login' | 'loading' | 'ready'
+type CropDoctorStatus = 'idle' | 'analyzing' | 'done' | 'error'
 
 type CropStrip = {
   area: string
@@ -600,6 +602,113 @@ Avoid generic disclaimers, fake confidence scores, and long explanations.`,
   return text
 }
 
+function readImageAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+
+    reader.addEventListener('load', () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result)
+        return
+      }
+
+      reject(new Error('Could not read image'))
+    })
+    reader.addEventListener('error', () => reject(new Error('Could not read image')))
+    reader.readAsDataURL(file)
+  })
+}
+
+async function askCropDoctor(imageUrl: string, fileName: string, activeView: ViewMode, selectedCell: RasterCell | null) {
+  const apiKey = import.meta.env.VITE_OPENAI_API_KEY
+
+  if (!apiKey) {
+    throw new Error('Missing VITE_OPENAI_API_KEY in .env.local')
+  }
+
+  const response = await fetch('https://api.openai.com/v1/responses', {
+    body: JSON.stringify({
+      input: [
+        {
+          content: [
+            {
+              text: `You are Crop Doctor inside Demeter, a farm operating system.
+Analyze the uploaded crop/leaf photo for likely disease, pest pressure, nutrient stress, or pesticide/fungicide considerations.
+Use practical farmer language. Return:
+1. Likely issue
+2. Evidence visible in the image
+3. Severity
+4. What to check in the field
+5. Treatment / pesticide guidance
+6. When to call an agronomist
+Be careful: phrase pesticide advice as guidance to verify against local regulations and label instructions. Do not claim certainty from one photo.`,
+              type: 'input_text',
+            },
+            {
+              image_url: imageUrl,
+              type: 'input_image',
+            },
+          ],
+          role: 'user',
+        },
+        {
+          content: [
+            {
+              text: JSON.stringify({
+                activeMapView: activeView,
+                fileName,
+                selectedZone: selectedCell
+                  ? {
+                      coordinate: formatCoordinate(getCellCenter(selectedCell)),
+                      ndvi: Number(selectedCell.ndvi.toFixed(2)),
+                      ndmi: Number(selectedCell.ndmi.toFixed(2)),
+                      thermalAnomalyC: selectedCell.thermal,
+                      mapLabel: selectedCell.label,
+                    }
+                  : null,
+                supportedReferenceClasses: [
+                  'Apple scab',
+                  'Corn rust',
+                  'Grape black rot',
+                  'Potato early blight',
+                  'Potato late blight',
+                  'Tomato bacterial spot',
+                  'Tomato late blight',
+                  'Tomato leaf mold',
+                  'Wheat rust',
+                  'Rice blast',
+                ],
+              }),
+              type: 'input_text',
+            },
+          ],
+          role: 'user',
+        },
+      ],
+      max_output_tokens: 520,
+      model: import.meta.env.VITE_OPENAI_MODEL || 'gpt-4.1-mini',
+    }),
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    method: 'POST',
+  })
+
+  if (!response.ok) {
+    throw new Error(`OpenAI request failed (${response.status})`)
+  }
+
+  const payload: unknown = await response.json()
+  const text = extractOpenAIText(payload)
+
+  if (!text) {
+    throw new Error('OpenAI returned no text')
+  }
+
+  return text
+}
+
 function App() {
   const [demoStage, setDemoStage] = useState<DemoStage>('login')
   const [loadingStep, setLoadingStep] = useState(0)
@@ -615,6 +724,9 @@ function App() {
   ])
   const [selectedCell, setSelectedCell] = useState<RasterCell | null>(null)
   const [copiedCoordinate, setCopiedCoordinate] = useState<string | null>(null)
+  const [cropDoctorImage, setCropDoctorImage] = useState<string | null>(null)
+  const [cropDoctorResult, setCropDoctorResult] = useState('')
+  const [cropDoctorStatus, setCropDoctorStatus] = useState<CropDoctorStatus>('idle')
   const [showSamplingPoints, setShowSamplingPoints] = useState(true)
   const [menuOpen, setMenuOpen] = useState(true)
   const [zoneCount, setZoneCount] = useState(3)
@@ -750,6 +862,44 @@ function App() {
 
     void askAgent('Create a scouting task')
   }
+  const analyzeCropPhoto = async (file: File | undefined) => {
+    if (!file) {
+      return
+    }
+
+    if (!file.type.startsWith('image/')) {
+      setCropDoctorStatus('error')
+      setCropDoctorResult('Upload a JPG, PNG, or HEIC crop photo.')
+      return
+    }
+
+    setActiveMenuPage('doctor')
+    setCropDoctorStatus('analyzing')
+    setCropDoctorResult('')
+
+    try {
+      const imageUrl = await readImageAsDataUrl(file)
+      setCropDoctorImage(imageUrl)
+      const result = await askCropDoctor(imageUrl, file.name, activeView, selectedCell)
+      setCropDoctorResult(result)
+      setCropDoctorStatus('done')
+    } catch (error) {
+      setCropDoctorStatus('error')
+      setCropDoctorResult(error instanceof Error ? error.message : 'Crop Doctor failed to analyze the image.')
+    }
+  }
+  const pageTitle =
+    activeMenuPage === 'agent'
+      ? 'Farm agent'
+      : activeMenuPage === 'doctor'
+        ? 'Crop Doctor'
+        : viewMeta[activeView].title
+  const pageSubtitle =
+    activeMenuPage === 'agent'
+      ? 'Field context assistant'
+      : activeMenuPage === 'doctor'
+        ? 'Image diagnosis'
+        : '26.3 ha · North France'
 
   if (demoStage !== 'ready') {
     return (
@@ -844,6 +994,14 @@ function App() {
           >
             <Sparkles size={20} />
           </button>
+          <button
+            className={activeMenuPage === 'doctor' ? 'active' : ''}
+            type="button"
+            aria-label="Crop Doctor"
+            onClick={() => setActiveMenuPage('doctor')}
+          >
+            <Camera size={20} />
+          </button>
         </nav>
 
         <section className="config-panel">
@@ -860,8 +1018,8 @@ function App() {
           </header>
 
           <section className="config-title">
-            <h1>{activeMenuPage === 'agent' ? 'Farm agent' : viewMeta[activeView].title}</h1>
-            <p>{activeMenuPage === 'agent' ? 'Field context assistant' : '26.3 ha · North France'}</p>
+            <h1>{pageTitle}</h1>
+            <p>{pageSubtitle}</p>
           </section>
 
           {activeMenuPage === 'config' ? (
@@ -944,7 +1102,7 @@ function App() {
                 <Button className="primary-action" icon="download" text="Export map" />
               </footer>
             </>
-          ) : (
+          ) : activeMenuPage === 'agent' ? (
             <section className="farm-playground page">
               <div className="playground-topline">
                 <span>
@@ -1005,6 +1163,55 @@ function App() {
                   <Send size={15} />
                 </button>
               </form>
+            </section>
+          ) : (
+            <section className="crop-doctor page">
+              <label className={`crop-upload ${cropDoctorImage ? 'has-image' : ''}`}>
+                {cropDoctorImage ? (
+                  <img alt="Uploaded crop" src={cropDoctorImage} />
+                ) : (
+                  <span>
+                    <Camera size={24} />
+                    <b>Add crop photo</b>
+                    <em>Leaf, fruit, stem, or field symptom</em>
+                  </span>
+                )}
+                <input
+                  accept="image/*"
+                  type="file"
+                  onChange={(event) => {
+                    void analyzeCropPhoto(event.target.files?.[0])
+                    event.currentTarget.value = ''
+                  }}
+                />
+              </label>
+
+              <div className="crop-doctor-status">
+                {cropDoctorStatus === 'idle' && (
+                  <>
+                    <strong>Drop in a photo, get a field action.</strong>
+                    <p>Disease, pest pressure, nutrient stress, and pesticide guidance are handled from the image.</p>
+                  </>
+                )}
+                {cropDoctorStatus === 'analyzing' && (
+                  <>
+                    <strong>Analyzing crop photo...</strong>
+                    <p>Checking visible symptoms against crop disease and treatment patterns.</p>
+                  </>
+                )}
+                {cropDoctorStatus === 'done' && (
+                  <>
+                    <strong>AI diagnosis</strong>
+                    <p>{cropDoctorResult}</p>
+                  </>
+                )}
+                {cropDoctorStatus === 'error' && (
+                  <>
+                    <strong>Could not analyze photo</strong>
+                    <p>{cropDoctorResult}</p>
+                  </>
+                )}
+              </div>
             </section>
           )}
         </section>

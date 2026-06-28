@@ -729,6 +729,96 @@
   cursor: pointer;
 }
 
+.crop-doctor.page {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0 18px 18px;
+}
+
+.crop-upload {
+  position: relative;
+  display: grid;
+  min-height: 230px;
+  place-items: center;
+  overflow: hidden;
+  border: 1px dashed #cbd9d0;
+  border-radius: 10px;
+  color: #4a5b50;
+  background: #f8fbf7;
+  cursor: pointer;
+}
+
+.crop-upload:hover {
+  border-color: rgba(24, 166, 108, 0.55);
+  background: #f2faf5;
+}
+
+.crop-upload input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.crop-upload span {
+  display: grid;
+  justify-items: center;
+  gap: 7px;
+  text-align: center;
+}
+
+.crop-upload svg {
+  color: #18a66c;
+}
+
+.crop-upload b,
+.crop-upload em {
+  display: block;
+}
+
+.crop-upload b {
+  color: #25322a;
+  font-size: 15px;
+}
+
+.crop-upload em {
+  color: #7c8a81;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.crop-upload img {
+  width: 100%;
+  height: 100%;
+  min-height: 230px;
+  object-fit: cover;
+}
+
+.crop-doctor-status {
+  margin-top: 14px;
+  padding: 15px;
+  border: 1px solid #e3e9e4;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(25, 35, 30, 0.04);
+}
+
+.crop-doctor-status strong {
+  display: block;
+  color: #25322a;
+  font-size: 15px;
+}
+
+.crop-doctor-status p {
+  margin: 8px 0 0;
+  color: #5d6b62;
+  font-size: 13px;
+  line-height: 1.48;
+  white-space: pre-wrap;
+}
+
 .config-actions {
   position: sticky;
   bottom: 0;
