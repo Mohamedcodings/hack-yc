@@ -9,12 +9,15 @@ import {
   getLiveDataSources,
   getLiveFarmContext,
 } from './connectors.ts'
+import { dataExchangeCatalogVersion, dataProducts } from './data-exchange/catalog.ts'
+import { buildDataExchangeManifest } from './data-exchange/exporter.ts'
+import { dataGovernancePolicy, governanceVersion } from './data-exchange/governance.ts'
 import { farmId } from './farm.ts'
 import { getOntologySnapshot } from './intelligence/ontology.ts'
 import { runAgronomicIntelligence } from './intelligence/pipeline.ts'
 import { createModelResponse } from './openai.ts'
 import { buildAgentInput, buildCropDoctorInput } from './prompts.ts'
-import { agentRequestSchema, cropDoctorRequestSchema } from './schemas.ts'
+import { agentRequestSchema, cropDoctorRequestSchema, dataExchangeRequestSchema } from './schemas.ts'
 
 const app = express()
 
@@ -104,6 +107,34 @@ app.get('/api/intelligence/field-state', async (_request, response, next) => {
 
 app.get('/api/intelligence/ontology', (_request, response) => {
   response.json(getOntologySnapshot())
+})
+
+app.get('/api/data-exchange/catalog', (_request, response) => {
+  response.json({
+    catalogVersion: dataExchangeCatalogVersion,
+    dataProducts,
+    generatedAt: new Date().toISOString(),
+    positioning: 'Consent-aware agriculture data exchange for public-sector and enterprise analytics.',
+  })
+})
+
+app.get('/api/data-exchange/governance', (_request, response) => {
+  response.json({
+    governanceVersion,
+    policy: dataGovernancePolicy,
+  })
+})
+
+app.post('/api/data-exchange/export', async (request, response, next) => {
+  try {
+    const payload = dataExchangeRequestSchema.parse(request.body)
+    const context = await getLiveFarmContext()
+    const intelligence = runAgronomicIntelligence(context)
+
+    response.json(buildDataExchangeManifest(payload, context, intelligence))
+  } catch (error) {
+    next(error)
+  }
 })
 
 app.post('/api/agent', async (request, response, next) => {

@@ -29,6 +29,7 @@ TypeScript Express API
   -> live data connectors
   -> source provenance
   -> agronomic intelligence pipeline
+  -> governed data exchange API
   -> OpenAI Responses API adapter
   -> validated AI workflows
 
@@ -50,6 +51,7 @@ External source systems
 - `server/provenance.ts` - source registry, cadence, evidence, and layer metadata.
 - `server/domain/` - typed agronomy domain model.
 - `server/intelligence/` - feature engineering, evidence fusion, recommendations, uncertainty, and provenance graph.
+- `server/data-exchange/` - governed data-product catalog and export manifests for enterprise/public-sector buyers.
 - `server/prompts.ts` - versioned prompts for the farm agent and Crop Doctor.
 - `server/schemas.ts` - Zod validation for every AI request.
 - `server/openai.ts` - isolated OpenAI Responses API adapter.
@@ -106,8 +108,24 @@ The browser never calls OpenAI or third-party intelligence APIs directly. The fr
 - `GET /api/farm-context` - aggregate context payload for the current farm.
 - `GET /api/intelligence/field-state` - fused field state with findings, recommendations, uncertainty, and provenance graph.
 - `GET /api/intelligence/ontology` - crop ontology and research concepts.
+- `GET /api/data-exchange/catalog` - governed catalog of agriculture data products for governments, insurers, cooperatives, and enterprises.
+- `GET /api/data-exchange/governance` - privacy, consent, aggregation, licensing, and retention policy.
+- `POST /api/data-exchange/export` - buyer-safe export manifest with lineage, contract terms, quality SLA, and sample records.
 - `POST /api/agent` - LLM farm agent using map, crop, raster, and farmer-message context.
 - `POST /api/crop-doctor` - image-based disease, pest, and pesticide guidance workflow.
+
+## Data Exchange Layer
+
+Demeter also exposes a governed data exchange layer. The business idea is that agriculture intelligence can become infrastructure for governments, cooperatives, insurers, food processors, input providers, and supply-chain enterprises.
+
+Current data products:
+
+- Regional Crop Stress Index
+- Soil Water Deficit Grid
+- Crop Supply Risk Feed
+- Public Sector Food Security Signals
+
+The exchange API is designed around consent and aggregation. It does not export raw farmer identity by default. Each package includes buyer eligibility, permitted uses, prohibited uses, license terms, provenance lineage, quality metadata, and buyer-safe sample records.
 
 ## Frontend Experience
 
@@ -166,6 +184,7 @@ High-value next steps:
 - Weather-risk models for mildew, septoria, rust, sclerotinia, and late blight.
 - Prescription-map export for machinery-compatible variable-rate application.
 - Audit logs for recommendations, farmer overrides, and agronomist validation.
+- Enterprise data exchange contracts, billing, consent management, and warehouse exports.
 - Role-based access for farmers, cooperatives, advisors, and seasonal workers.
 
 ## Technical Docs
@@ -173,5 +192,6 @@ High-value next steps:
 - [Architecture](docs/architecture.md)
 - [Intelligence Layer](docs/intelligence-layer.md)
 - [API Data Contracts](docs/data-contracts.md)
+- [Data Exchange API](docs/data-exchange.md)
 - [Research Notes](docs/research-notes.md)
 - [ADR 0001](docs/adr/0001-backend-intelligence-layer.md)

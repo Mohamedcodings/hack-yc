@@ -77,3 +77,17 @@ Runs the farm agent with validated map, crop, raster, and farmer-message context
 `POST /api/crop-doctor`
 
 Runs image-based crop diagnosis with optional crop and note context.
+
+## Data Exchange
+
+`GET /api/data-exchange/catalog`
+
+Returns governed agriculture data products for public-sector and enterprise buyers.
+
+`GET /api/data-exchange/governance`
+
+Returns consent, privacy, licensing, aggregation, export restriction, and retention policy metadata.
+
+`POST /api/data-exchange/export`
+
+Builds a preview export manifest for a buyer-safe data product. The manifest contains product metadata, contract terms, delivery settings, source lineage, quality SLA, and sample anonymized or aggregated records.

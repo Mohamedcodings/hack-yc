@@ -12,6 +12,7 @@ Express TypeScript API
   -> Open-Meteo forecast API
   -> ISRIC SoilGrids REST API
   -> Copernicus Data Space STAC API
+  -> Data Exchange API for governed public-sector and enterprise exports
 ```
 
 The browser never receives provider credentials and never calls OpenAI directly. This keeps the visible product flexible while preserving a clean migration path to production authentication, telemetry, and database persistence.
@@ -21,6 +22,7 @@ The browser never receives provider credentials and never calls OpenAI directly.
 - `server/connectors.ts` retrieves live external context and degrades each source independently.
 - `server/provenance.ts` describes source systems, cadence, layers, and sync state.
 - `server/intelligence/` turns live context into a field-state inference graph.
+- `server/data-exchange/` packages aggregated agriculture intelligence into governed data products.
 - `server/openai.ts` isolates LLM transport from product prompts.
 - `server/prompts.ts` contains versioned agent and crop-diagnosis behavior.
 - `server/schemas.ts` validates every AI request before model execution.
@@ -50,3 +52,4 @@ The current architecture is ready for these next integrations:
 - Farm operation history, input logs, and machinery telemetry.
 - Role-based access control for cooperatives, advisors, and farm workers.
 - Model monitoring for crop disease diagnosis and recommendation quality.
+- Consent-aware data marketplace exports for governments, cooperatives, insurers, and supply-chain enterprises.
