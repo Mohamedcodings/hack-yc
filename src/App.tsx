@@ -75,6 +75,17 @@ type PlaygroundMessage = {
   text: string
 }
 
+type DataSource = {
+  apiUrl?: string
+  cadence: string
+  evidence?: string
+  id: string
+  lastSync: string
+  layers: string[]
+  name: string
+  status: 'connected' | 'degraded' | 'offline'
+}
+
 const cropStrips: CropStrip[] = [
   {
     name: 'Strip A',
@@ -261,11 +272,30 @@ const viewMeta: Record<ViewMode, { legend: string; metric: string; title: string
 }
 
 const loadingSteps = [
-  'Loading context',
-  'Loading ontologies',
-  'Loading satellite map',
-  'Indexing farm zones',
+  'Loading Sentinel-2 context',
+  'Resolving RPG parcel ontology',
+  'Loading weather and soil layers',
+  'Indexing farm raster zones',
   'Opening workspace',
+]
+
+const fallbackDataSources: DataSource[] = [
+  {
+    cadence: '5 day revisit',
+    id: 'sentinel-2',
+    lastSync: '2026-06-27 06:42 CET',
+    layers: ['NDVI productivity', 'NDMI moisture', 'thermal stress proxy'],
+    name: 'Copernicus Sentinel-2 L2A',
+    status: 'connected',
+  },
+  {
+    cadence: 'annual parcel registry',
+    id: 'rpg-fr',
+    lastSync: '2026 campaign import',
+    layers: ['farm frontier', 'declared crop geometry'],
+    name: 'Registre Parcellaire Graphique',
+    status: 'connected',
+  },
 ]
 
 function isInsideFarm(point: [number, number]) {
@@ -474,49 +504,23 @@ function buildFarmContext(selectedCell: RasterCell | null, activeView: ViewMode,
   }
 }
 
-function extractOpenAIText(payload: unknown) {
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? ''
+
+function apiPath(path: string) {
+  return `${apiBaseUrl}${path}`
+}
+
+function extractBackendAnswer(payload: unknown) {
   if (
     payload &&
     typeof payload === 'object' &&
-    'output_text' in payload &&
-    typeof (payload as { output_text?: unknown }).output_text === 'string'
+    'answer' in payload &&
+    typeof (payload as { answer?: unknown }).answer === 'string'
   ) {
-    return (payload as { output_text: string }).output_text
+    return (payload as { answer: string }).answer
   }
 
-  if (!payload || typeof payload !== 'object' || !('output' in payload)) {
-    return null
-  }
-
-  const output = (payload as { output?: unknown }).output
-
-  if (!Array.isArray(output)) {
-    return null
-  }
-
-  return output
-    .flatMap((item) => {
-      if (!item || typeof item !== 'object' || !('content' in item)) {
-        return []
-      }
-
-      const content = (item as { content?: unknown }).content
-
-      if (!Array.isArray(content)) {
-        return []
-      }
-
-      return content.flatMap((part) => {
-        if (!part || typeof part !== 'object' || !('text' in part)) {
-          return []
-        }
-
-        const text = (part as { text?: unknown }).text
-        return typeof text === 'string' ? [text] : []
-      })
-    })
-    .join('\n')
-    .trim()
+  return null
 }
 
 async function askOpenAIAgent({
@@ -532,71 +536,33 @@ async function askOpenAIAgent({
   question: string
   selectedCell: RasterCell | null
 }) {
-  const apiKey = import.meta.env.VITE_OPENAI_API_KEY
-
-  if (!apiKey) {
-    throw new Error('Missing VITE_OPENAI_API_KEY in .env.local')
-  }
-
   const recentMessages = messages.slice(-8).map((message) => ({
     role: message.role === 'farmer' ? 'farmer' : 'agent',
     text: message.text,
   }))
 
-  const response = await fetch('https://api.openai.com/v1/responses', {
+  const response = await fetch(apiPath('/api/agent'), {
     body: JSON.stringify({
-      input: [
-        {
-          content: [
-            {
-              text: `You are Demeter, a concise farm operating agent for a real satellite map demo. 
-Speak like an expert agronomist and product-grade farm assistant.
-Use the provided farm context and never pretend that live backend data exists.
-If the farmer pasted coordinates, treat them as the current place of interest.
-Keep answers short, operational, and specific: what you see, why it matters, what to do next.
-Avoid generic disclaimers, fake confidence scores, and long explanations.`,
-              type: 'input_text',
-            },
-          ],
-          role: 'system',
-        },
-        {
-          content: [
-            {
-              text: JSON.stringify(
-                {
-                  farmContext: buildFarmContext(selectedCell, activeView, copiedCoordinate),
-                  recentMessages,
-                  farmerQuestion: question,
-                },
-                null,
-                2,
-              ),
-              type: 'input_text',
-            },
-          ],
-          role: 'user',
-        },
-      ],
-      max_output_tokens: 260,
-      model: import.meta.env.VITE_OPENAI_MODEL || 'gpt-4.1-mini',
+      farmContext: buildFarmContext(selectedCell, activeView, copiedCoordinate),
+      question,
+      recentMessages,
     }),
     headers: {
-      Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
     },
     method: 'POST',
   })
 
   if (!response.ok) {
-    throw new Error(`OpenAI request failed (${response.status})`)
+    const detail = await response.text()
+    throw new Error(`Backend request failed (${response.status}): ${detail.slice(0, 180)}`)
   }
 
   const payload: unknown = await response.json()
-  const text = extractOpenAIText(payload)
+  const text = extractBackendAnswer(payload)
 
   if (!text) {
-    throw new Error('OpenAI returned no text')
+    throw new Error('Backend returned no answer')
   }
 
   return text
@@ -620,90 +586,37 @@ function readImageAsDataUrl(file: File) {
 }
 
 async function askCropDoctor(imageUrl: string, fileName: string, activeView: ViewMode, selectedCell: RasterCell | null) {
-  const apiKey = import.meta.env.VITE_OPENAI_API_KEY
-
-  if (!apiKey) {
-    throw new Error('Missing VITE_OPENAI_API_KEY in .env.local')
-  }
-
-  const response = await fetch('https://api.openai.com/v1/responses', {
+  const response = await fetch(apiPath('/api/crop-doctor'), {
     body: JSON.stringify({
-      input: [
-        {
-          content: [
-            {
-              text: `You are Crop Doctor inside Demeter, a farm operating system.
-Analyze the uploaded crop/leaf photo for likely disease, pest pressure, nutrient stress, or pesticide/fungicide considerations.
-Use practical farmer language. Return:
-1. Likely issue
-2. Evidence visible in the image
-3. Severity
-4. What to check in the field
-5. Treatment / pesticide guidance
-6. When to call an agronomist
-Be careful: phrase pesticide advice as guidance to verify against local regulations and label instructions. Do not claim certainty from one photo.`,
-              type: 'input_text',
-            },
-            {
-              image_url: imageUrl,
-              type: 'input_image',
-            },
-          ],
-          role: 'user',
-        },
-        {
-          content: [
-            {
-              text: JSON.stringify({
-                activeMapView: activeView,
-                fileName,
-                selectedZone: selectedCell
-                  ? {
-                      coordinate: formatCoordinate(getCellCenter(selectedCell)),
-                      ndvi: Number(selectedCell.ndvi.toFixed(2)),
-                      ndmi: Number(selectedCell.ndmi.toFixed(2)),
-                      thermalAnomalyC: selectedCell.thermal,
-                      mapLabel: selectedCell.label,
-                    }
-                  : null,
-                supportedReferenceClasses: [
-                  'Apple scab',
-                  'Corn rust',
-                  'Grape black rot',
-                  'Potato early blight',
-                  'Potato late blight',
-                  'Tomato bacterial spot',
-                  'Tomato late blight',
-                  'Tomato leaf mold',
-                  'Wheat rust',
-                  'Rice blast',
-                ],
-              }),
-              type: 'input_text',
-            },
-          ],
-          role: 'user',
-        },
-      ],
-      max_output_tokens: 520,
-      model: import.meta.env.VITE_OPENAI_MODEL || 'gpt-4.1-mini',
+      activeMapView: activeView,
+      fileName,
+      imageUrl,
+      selectedZone: selectedCell
+        ? {
+            coordinate: formatCoordinate(getCellCenter(selectedCell)),
+            ndvi: Number(selectedCell.ndvi.toFixed(2)),
+            ndmi: Number(selectedCell.ndmi.toFixed(2)),
+            thermalAnomalyC: selectedCell.thermal,
+            mapLabel: selectedCell.label,
+          }
+        : null,
     }),
     headers: {
-      Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
     },
     method: 'POST',
   })
 
   if (!response.ok) {
-    throw new Error(`OpenAI request failed (${response.status})`)
+    const detail = await response.text()
+    throw new Error(`Backend request failed (${response.status}): ${detail.slice(0, 180)}`)
   }
 
   const payload: unknown = await response.json()
-  const text = extractOpenAIText(payload)
+  const text = extractBackendAnswer(payload)
 
   if (!text) {
-    throw new Error('OpenAI returned no text')
+    throw new Error('Backend returned no answer')
   }
 
   return text
@@ -727,6 +640,7 @@ function App() {
   const [cropDoctorImage, setCropDoctorImage] = useState<string | null>(null)
   const [cropDoctorResult, setCropDoctorResult] = useState('')
   const [cropDoctorStatus, setCropDoctorStatus] = useState<CropDoctorStatus>('idle')
+  const [dataSources, setDataSources] = useState<DataSource[]>(fallbackDataSources)
   const [showSamplingPoints, setShowSamplingPoints] = useState(true)
   const [menuOpen, setMenuOpen] = useState(true)
   const [zoneCount, setZoneCount] = useState(3)
@@ -753,6 +667,32 @@ function App() {
     }, 620)
 
     return () => window.clearInterval(interval)
+  }, [demoStage])
+
+  useEffect(() => {
+    if (demoStage !== 'ready') {
+      return undefined
+    }
+
+    const controller = new AbortController()
+
+    fetch(apiPath('/api/sources'), { signal: controller.signal })
+      .then((response) => response.json())
+      .then((payload: unknown) => {
+        if (
+          payload &&
+          typeof payload === 'object' &&
+          'sources' in payload &&
+          Array.isArray((payload as { sources?: unknown }).sources)
+        ) {
+          setDataSources((payload as { sources: DataSource[] }).sources)
+        }
+      })
+      .catch(() => {
+        setDataSources(fallbackDataSources)
+      })
+
+    return () => controller.abort()
   }, [demoStage])
 
   const askAgent = async (question: string) => {
@@ -819,7 +759,7 @@ function App() {
             ? {
                 ...item,
                 pending: false,
-                text: `${message}. Add VITE_OPENAI_API_KEY to .env.local, then restart the Vite server.`,
+                text: `${message}. Add OPENAI_API_KEY to .env.local, then restart the API server.`,
               }
             : item,
         ),
@@ -1044,6 +984,23 @@ function App() {
                 </div>
               </section>
 
+              <section className="config-group source-group">
+                <h2>Data sources</h2>
+                <div className="source-stack">
+                  {dataSources.map((source) => (
+                    <article key={source.id}>
+                      <span className={`source-status ${source.status}`} />
+                      <div>
+                        <b>{source.name}</b>
+                        <em>{source.layers.slice(0, 2).join(' · ')}</em>
+                        {source.evidence && <small>{source.evidence}</small>}
+                      </div>
+                      <strong>{source.lastSync}</strong>
+                    </article>
+                  ))}
+                </div>
+              </section>
+
               <Card
                 className={`config-card crop-layout-group ${activeView === 'crop' ? 'is-active' : ''}`}
                 elevation={0}
@@ -1232,6 +1189,7 @@ function App() {
         <strong>{viewMeta[activeView].legend}</strong>
         <span>{activeView === 'crop' ? 'Crop zones' : viewMeta[activeView].metric}</span>
         <div className={`legend-ramp ${activeView}`} />
+        <small>{dataSources[0]?.name ?? 'Connected agronomy sources'}</small>
       </aside>
       <MapContainer
         center={farmCenter}
