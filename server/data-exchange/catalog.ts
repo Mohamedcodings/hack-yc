@@ -1,4 +1,4 @@
-import type { DataProduct } from '../domain/data-exchange.ts'
+import type { DataProduct } from '../domain/data-exchange.js'
 
 export const dataExchangeCatalogVersion = 'data-exchange-catalog-v0.1.0'
 

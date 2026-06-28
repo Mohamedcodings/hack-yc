@@ -5,7 +5,7 @@ import type {
   IntelligenceRecommendation,
   ProvenanceGraph,
   ProvenanceNode,
-} from '../domain/agronomy.ts'
+} from '../domain/agronomy.js'
 
 const featureSourceMap: Record<keyof FeatureVector, EvidenceSignal['source']> = {
   cloudCover: 'sentinel-2',

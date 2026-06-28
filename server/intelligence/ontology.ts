@@ -1,4 +1,4 @@
-import type { AgronomicFactor } from '../domain/agronomy.ts'
+import type { AgronomicFactor } from '../domain/agronomy.js'
 
 export const ontologyVersion = 'agronomy-ontology-v0.2.0'
 

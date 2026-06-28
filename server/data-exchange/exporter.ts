@@ -1,8 +1,8 @@
-import { farmId } from '../farm.ts'
-import type { IntelligenceState, LiveFarmContext } from '../domain/agronomy.ts'
-import type { DataExchangeManifest, DataExchangeRequest } from '../domain/data-exchange.ts'
-import { getDataProduct } from './catalog.ts'
-import { buildContractTerms, dataGovernancePolicy, governanceVersion } from './governance.ts'
+import { farmId } from '../farm.js'
+import type { IntelligenceState, LiveFarmContext } from '../domain/agronomy.js'
+import type { DataExchangeManifest, DataExchangeRequest } from '../domain/data-exchange.js'
+import { getDataProduct } from './catalog.js'
+import { buildContractTerms, dataGovernancePolicy, governanceVersion } from './governance.js'
 
 function formatTimeRange(request: DataExchangeRequest) {
   if (!request.timeRange) {

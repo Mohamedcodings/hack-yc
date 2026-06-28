@@ -1,4 +1,4 @@
-import type { IntelligenceFinding, IntelligenceRecommendation } from '../domain/agronomy.ts'
+import type { IntelligenceFinding, IntelligenceRecommendation } from '../domain/agronomy.js'
 
 const actionByFactor = {
   canopy_vigor: 'Use the next cloud-free image before changing rates.',

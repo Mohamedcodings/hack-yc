@@ -1,4 +1,4 @@
-import { config, assertConfigured } from './config.ts'
+import { config, assertConfigured } from './config.js'
 
 type ResponsesPayload = {
   input: unknown[]

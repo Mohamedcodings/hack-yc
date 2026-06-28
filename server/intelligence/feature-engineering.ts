@@ -1,4 +1,4 @@
-import type { FeatureVector, LiveFarmContext, SoilContext, WeatherContext } from '../domain/agronomy.ts'
+import type { FeatureVector, LiveFarmContext, SoilContext, WeatherContext } from '../domain/agronomy.js'
 
 function mean(values: Array<number | undefined> | undefined) {
   const filtered = values?.filter((value): value is number => Number.isFinite(value)) ?? []

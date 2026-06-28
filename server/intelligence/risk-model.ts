@@ -1,4 +1,4 @@
-import type { EvidenceSignal, FeatureVector } from '../domain/agronomy.ts'
+import type { EvidenceSignal, FeatureVector } from '../domain/agronomy.js'
 
 function normalize(value: number | null, low: number, high: number) {
   if (value == null) {

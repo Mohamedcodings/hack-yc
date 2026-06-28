@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs'
 
-import { config } from './config.ts'
-import { farmBounds, farmCenter } from './farm.ts'
-import { farmDataSources, type FarmDataSource } from './provenance.ts'
+import { config } from './config.js'
+import { farmBounds, farmCenter } from './farm.js'
+import { farmDataSources, type FarmDataSource } from './provenance.js'
 
 type WeatherPayload = {
   daily?: {

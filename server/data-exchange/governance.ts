@@ -1,4 +1,4 @@
-import type { BuyerSegment, DataGovernancePolicy, DataProduct } from '../domain/data-exchange.ts'
+import type { BuyerSegment, DataGovernancePolicy, DataProduct } from '../domain/data-exchange.js'
 
 export const governanceVersion = 'data-governance-v0.1.0'
 

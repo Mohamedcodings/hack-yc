@@ -2,23 +2,23 @@ import express from 'express'
 import { clerkMiddleware, getAuth } from '@clerk/express'
 import { ZodError } from 'zod'
 
-import { config } from './config.ts'
+import { config } from './config.js'
 import {
   fetchSatelliteContext,
   fetchSoilContext,
   fetchWeatherContext,
   getLiveDataSources,
   getLiveFarmContext,
-} from './connectors.ts'
-import { dataExchangeCatalogVersion, dataProducts } from './data-exchange/catalog.ts'
-import { buildDataExchangeManifest } from './data-exchange/exporter.ts'
-import { dataGovernancePolicy, governanceVersion } from './data-exchange/governance.ts'
-import { farmId } from './farm.ts'
-import { getOntologySnapshot } from './intelligence/ontology.ts'
-import { runAgronomicIntelligence } from './intelligence/pipeline.ts'
-import { createModelResponse } from './openai.ts'
-import { buildAgentInput, buildCropDoctorInput } from './prompts.ts'
-import { agentRequestSchema, cropDoctorRequestSchema, dataExchangeRequestSchema } from './schemas.ts'
+} from './connectors.js'
+import { dataExchangeCatalogVersion, dataProducts } from './data-exchange/catalog.js'
+import { buildDataExchangeManifest } from './data-exchange/exporter.js'
+import { dataGovernancePolicy, governanceVersion } from './data-exchange/governance.js'
+import { farmId } from './farm.js'
+import { getOntologySnapshot } from './intelligence/ontology.js'
+import { runAgronomicIntelligence } from './intelligence/pipeline.js'
+import { createModelResponse } from './openai.js'
+import { buildAgentInput, buildCropDoctorInput } from './prompts.js'
+import { agentRequestSchema, cropDoctorRequestSchema, dataExchangeRequestSchema } from './schemas.js'
 
 const app = express()
 const authEnabled = Boolean(config.clerkSecretKey)

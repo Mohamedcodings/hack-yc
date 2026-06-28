@@ -2,14 +2,14 @@ import {
   intelligenceVersion,
   type IntelligenceState,
   type LiveFarmContext,
-} from '../domain/agronomy.ts'
-import { fuseEvidence } from './evidence-fusion.ts'
-import { buildFeatureVector } from './feature-engineering.ts'
-import { buildProvenanceGraph } from './provenance-graph.ts'
-import { deriveEvidenceSignals } from './risk-model.ts'
-import { ontologyVersion } from './ontology.ts'
-import { buildRecommendations } from './recommendation-engine.ts'
-import { estimateIntelligenceQuality } from './uncertainty.ts'
+} from '../domain/agronomy.js'
+import { fuseEvidence } from './evidence-fusion.js'
+import { buildFeatureVector } from './feature-engineering.js'
+import { buildProvenanceGraph } from './provenance-graph.js'
+import { deriveEvidenceSignals } from './risk-model.js'
+import { ontologyVersion } from './ontology.js'
+import { buildRecommendations } from './recommendation-engine.js'
+import { estimateIntelligenceQuality } from './uncertainty.js'
 
 export function runAgronomicIntelligence(context: LiveFarmContext): IntelligenceState {
   const featureVector = buildFeatureVector(context)

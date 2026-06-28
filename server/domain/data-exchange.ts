@@ -1,4 +1,4 @@
-import type { EvidenceSourceId, IntelligenceQuality } from './agronomy.ts'
+import type { EvidenceSourceId, IntelligenceQuality } from './agronomy.js'
 
 export type BuyerSegment = 'cooperative' | 'enterprise' | 'government' | 'insurance' | 'research'
 

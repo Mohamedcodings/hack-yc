@@ -1,4 +1,4 @@
-import type { AgentRequest, CropDoctorRequest } from './schemas.ts'
+import type { AgentRequest, CropDoctorRequest } from './schemas.js'
 
 export function buildAgentInput(request: AgentRequest) {
   return [
