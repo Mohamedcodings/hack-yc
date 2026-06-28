@@ -30,7 +30,7 @@ export const farmDataSources: FarmDataSource[] = [
   },
   {
     id: 'meteo-france',
-    name: 'Meteo-France AROME',
+    name: 'Open-Meteo Forecast API',
     cadence: 'hourly model refresh',
     layers: ['rainfall', 'canopy stress', 'spray window'],
     lastSync: '2026-06-28 08:00 CET',

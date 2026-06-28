@@ -10,6 +10,8 @@ import {
   getLiveFarmContext,
 } from './connectors.ts'
 import { farmId } from './farm.ts'
+import { getOntologySnapshot } from './intelligence/ontology.ts'
+import { runAgronomicIntelligence } from './intelligence/pipeline.ts'
 import { createModelResponse } from './openai.ts'
 import { buildAgentInput, buildCropDoctorInput } from './prompts.ts'
 import { agentRequestSchema, cropDoctorRequestSchema } from './schemas.ts'
@@ -77,13 +79,31 @@ app.get('/api/live/satellite', async (_request, response, next) => {
 app.get('/api/farm-context', async (_request, response, next) => {
   try {
     response.json({
-      farmId,
       context: await getLiveFarmContext(),
-    generatedAt: new Date().toISOString(),
+      farmId,
+      generatedAt: new Date().toISOString(),
     })
   } catch (error) {
     next(error)
   }
+})
+
+app.get('/api/intelligence/field-state', async (_request, response, next) => {
+  try {
+    const context = await getLiveFarmContext()
+
+    response.json({
+      context,
+      farmId,
+      intelligence: runAgronomicIntelligence(context),
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.get('/api/intelligence/ontology', (_request, response) => {
+  response.json(getOntologySnapshot())
 })
 
 app.post('/api/agent', async (request, response, next) => {

@@ -1,8 +1,8 @@
 # Demeter.ai Farm OS
 
-Frontend + backend hackathon prototype for a farmer-facing agriculture operating system.
+Frontend + backend hackathon prototype for a farmer-facing agriculture intelligence layer.
 
-The demo shows a real satellite farm map in northern France, crop/raster overlays, an LLM farm agent, and a Crop Doctor image diagnosis flow.
+The demo shows a real satellite farm map in northern France, crop/raster overlays, a typed agronomic intelligence backend, an LLM farm agent, and a Crop Doctor image diagnosis flow.
 
 ## Architecture
 
@@ -11,6 +11,8 @@ The demo shows a real satellite farm map in northern France, crop/raster overlay
 - `server/prompts.ts` - versioned product prompts for the farm agent and Crop Doctor.
 - `server/schemas.ts` - Zod validation for every AI endpoint.
 - `server/openai.ts` - isolated OpenAI Responses API adapter.
+- `server/intelligence/` - deterministic agronomic inference pipeline with feature engineering, evidence fusion, recommendations, provenance graph, and uncertainty scoring.
+- `docs/` - architecture, API contracts, intelligence-layer notes, and ADRs.
 
 The browser never calls OpenAI directly. It sends farm context or crop photos to the backend:
 
@@ -21,6 +23,8 @@ The browser never calls OpenAI directly. It sends farm context or crop photos to
 - `GET /api/live/soil` - live soil profile extraction through ISRIC SoilGrids.
 - `GET /api/live/satellite` - live Sentinel-2 metadata extraction through Copernicus Data Space STAC.
 - `GET /api/farm-context` - aggregate context payload for the current farm.
+- `GET /api/intelligence/field-state` - fused agronomic field state with findings, recommendations, uncertainty, and provenance graph.
+- `GET /api/intelligence/ontology` - crop ontology and research concepts used by the intelligence layer.
 - `GET /api/health` - backend health check.
 
 ## Run Locally
@@ -44,8 +48,9 @@ This is intentionally lightweight for a hackathon, but it follows production bou
 - Inputs are validated before calling the model.
 - Frontend stays focused on farmer workflows.
 - The system is ready to replace mocked farm context with a database or real agronomy APIs.
-- Data provenance is explicit: the demo maps current layers to source systems such as Sentinel-2, RPG parcels, Meteo-France, SoilGrids, and basemap tiles.
+- Data provenance is explicit: the demo maps current layers to source systems such as Sentinel-2, RPG parcels, Open-Meteo, SoilGrids, and basemap tiles.
 - Where public no-key APIs are available, connectors fetch live data at request time. When a production-grade source needs credentials, the code keeps the source visible and isolated behind backend connector boundaries.
+- The intelligence layer returns inspectable evidence instead of untraceable demo text: feature vector, factor posteriors, recommendation rationale, uncertainty, and source-to-decision graph.
 
 ## Demo Flow
 
@@ -54,3 +59,11 @@ This is intentionally lightweight for a hackathon, but it follows production bou
 3. Explore productivity, moisture, thermal, prescription, and crop layout views.
 4. Ask the farm agent questions about the active field.
 5. Upload a crop photo in Crop Doctor for disease/treatment guidance.
+
+## Technical Docs
+
+- [Architecture](docs/architecture.md)
+- [Intelligence Layer](docs/intelligence-layer.md)
+- [API Data Contracts](docs/data-contracts.md)
+- [Research Notes](docs/research-notes.md)
+- [ADR 0001](docs/adr/0001-backend-intelligence-layer.md)
