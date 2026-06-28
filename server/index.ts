@@ -3,6 +3,7 @@ import { clerkMiddleware, getAuth } from '@clerk/express'
 import { ZodError } from 'zod'
 
 import { config } from './config.js'
+import { extractBearerToken, getSupabaseUser, supabaseConfigured } from './auth.js'
 import {
   fetchSatelliteContext,
   fetchSoilContext,
@@ -14,6 +15,7 @@ import { dataExchangeCatalogVersion, dataProducts } from './data-exchange/catalo
 import { buildDataExchangeManifest } from './data-exchange/exporter.js'
 import { dataGovernancePolicy, governanceVersion } from './data-exchange/governance.js'
 import { farmId } from './farm.js'
+import { buildFieldDetail, listFields } from './field-detail.js'
 import { getOntologySnapshot } from './intelligence/ontology.js'
 import { runAgronomicIntelligence } from './intelligence/pipeline.js'
 import { createModelResponse } from './openai.js'
@@ -21,12 +23,13 @@ import { buildAgentInput, buildCropDoctorInput } from './prompts.js'
 import { agentRequestSchema, cropDoctorRequestSchema, dataExchangeRequestSchema } from './schemas.js'
 
 const app = express()
-const authEnabled = Boolean(config.clerkSecretKey)
+const clerkEnabled = Boolean(config.clerkSecretKey)
+const authEnabled = clerkEnabled || supabaseConfigured
 
 app.use(express.json({ limit: '12mb' }))
 app.use((request, response, next) => {
   response.setHeader('Access-Control-Allow-Origin', request.headers.origin ?? '*')
-  response.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+  response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
   response.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
 
   if (request.method === 'OPTIONS') {
@@ -37,7 +40,7 @@ app.use((request, response, next) => {
   next()
 })
 
-if (authEnabled) {
+if (clerkEnabled) {
   app.use(
     clerkMiddleware({
       publishableKey: config.clerkPublishableKey,
@@ -46,27 +49,42 @@ if (authEnabled) {
   )
 }
 
-const requireAuth: express.RequestHandler = (request, response, next) => {
+const requireAuth: express.RequestHandler = async (request, response, next) => {
   if (!authEnabled) {
     next()
     return
   }
 
-  const { userId } = getAuth(request)
+  if (supabaseConfigured) {
+    const token = extractBearerToken(request.headers.authorization)
 
-  if (!userId) {
-    response.status(401).json({
-      error: 'Authentication required',
-    })
-    return
+    if (token) {
+      const user = await getSupabaseUser(token)
+
+      if (user) {
+        next()
+        return
+      }
+    }
   }
 
-  next()
+  if (clerkEnabled) {
+    const { userId } = getAuth(request)
+
+    if (userId) {
+      next()
+      return
+    }
+  }
+
+  response.status(401).json({
+    error: 'Authentication required',
+  })
 }
 
 app.get('/api/health', (_request, response) => {
   response.json({
-    auth: authEnabled ? 'clerk' : 'demo',
+    auth: supabaseConfigured ? 'supabase' : clerkEnabled ? 'clerk' : 'demo',
     ok: true,
     model: config.openAIModel,
     service: 'demeter-api',
@@ -80,6 +98,22 @@ app.get('/api/sources', async (_request, response, next) => {
       generatedAt: new Date().toISOString(),
       sources: await getLiveDataSources(),
     })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.get('/api/fields', (_request, response) => {
+  response.json({
+    farmId,
+    fields: listFields(),
+    generatedAt: new Date().toISOString(),
+  })
+})
+
+app.get('/api/fields/:id', async (request, response, next) => {
+  try {
+    response.json(await buildFieldDetail(request.params.id))
   } catch (error) {
     next(error)
   }

@@ -1,25 +1,174 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { UserButton } from '@clerk/clerk-react'
 import { Button, Card, FormGroup, HTMLSelect, NumericInput, Switch } from '@blueprintjs/core'
 import {
+  BookOpen,
   Camera,
   ChevronRight,
+  CircleUserRound,
   Grid2X2,
+  Headphones,
   Layers3,
+  Leaf,
   Radar,
   Send,
+  Smartphone,
   Sparkles,
   Sprout,
   ThermometerSun,
   Waves,
 } from 'lucide-react'
 import { MapContainer, Polygon, TileLayer, Tooltip, useMap, useMapEvents } from 'react-leaflet'
+import { authFetch } from './lib/apiClient'
+import { dataLayer, type Field, type FieldDetail } from './lib/dataLayer'
+import {
+  FieldDetailPanel,
+  FieldListPanel,
+  MapLayerMenu,
+  SelectionActionBar,
+  WeatherModal,
+  type MapLayerId,
+} from './components/dashboard'
+import { WheatLogo } from './components/WheatLogo'
+import { DemoNotifications } from './components/Notifications'
+import { Filter, Search as SearchIcon } from 'lucide-react'
 import '@blueprintjs/core/lib/css/blueprint.css'
 import '@blueprintjs/icons/lib/css/blueprint-icons.css'
 import 'leaflet/dist/leaflet.css'
+import './design-system.css'
 import './App.css'
+import './dashboard.css'
 
-const farmCenter: [number, number] = [50.2511, 2.7461]
+const farmCenter: [number, number] = [50.2444, 2.7405]
+
+// NDVI vigor ramp (red -> yellow -> green) and per-layer fill for the field choropleth.
+function ndviColor(ndvi: number) {
+  if (ndvi >= 0.72) return '#0a8849'
+  if (ndvi >= 0.62) return '#2c9c45'
+  if (ndvi >= 0.5) return '#93b33a'
+  if (ndvi >= 0.4) return '#d4b536'
+  return '#c75b2c'
+}
+
+const cropColors: Record<string, string> = {
+  Potato: '#58a6ff',
+  'Wheat soft, winter': '#e0c33b',
+  Rapeseed: '#f2c84b',
+  'Sugar beet': '#db6fbd',
+  Maize: '#ff8f4f',
+  Barley: '#b9d04b',
+}
+
+// Layers that render a detailed per-cell raster inside each field (vs a flat fill).
+const RASTER_LAYERS = new Set(['productivity', 'vegetation', 'moisture', 'yield'])
+
+function layerCellColor(ndvi: number, layer: string) {
+  if (layer === 'moisture') {
+    const m = (ndvi - 0.3) / 0.5
+    return m > 0.6 ? '#1c8ec9' : m > 0.4 ? '#5ab1cf' : '#d7a33a'
+  }
+  if (layer === 'yield') {
+    return ndvi > 0.6 ? '#8b4bb2' : ndvi > 0.45 ? '#c979be' : '#ead8f0'
+  }
+  return ndviColor(ndvi)
+}
+
+function fieldFill(field: Field, layer: string): { fill: string; opacity: number } | null {
+  if (layer === 'crop') {
+    return field.crop ? { fill: cropColors[field.crop] ?? '#9a9a9a', opacity: 0.5 } : null
+  }
+  // raster layers paint cells (handled separately); satellite/planting/harvest -> outline only.
+  return null
+}
+
+function pointInRing([lat, lng]: [number, number], ring: [number, number][]) {
+  let inside = false
+
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [latI, lngI] = ring[i]
+    const [latJ, lngJ] = ring[j]
+    const intersects = lngI > lng !== lngJ > lng && lat < ((latJ - latI) * (lng - lngI)) / (lngJ - lngI) + latI
+
+    if (intersects) {
+      inside = !inside
+    }
+  }
+
+  return inside
+}
+
+type FieldCell = { id: string; positions: [number, number][]; ndvi: number; ndmi: number; color: string }
+
+// Detailed NDVI raster inside a field — fine cells + smooth multi-frequency noise so
+// neighbouring cells transition gradually (like the original), not as garish blocks.
+function buildFieldRaster(field: Field, layer: string): FieldCell[] {
+  const lats = field.boundary.map((p) => p[0])
+  const lngs = field.boundary.map((p) => p[1])
+  const minLat = Math.min(...lats)
+  const maxLat = Math.max(...lats)
+  const minLng = Math.min(...lngs)
+  const maxLng = Math.max(...lngs)
+  const spanLat = maxLat - minLat
+  const spanLng = maxLng - minLng
+
+  // Fixed-ish cell size -> big fields get more cells (fine, consistent detail).
+  const target = 0.0002
+  const rows = Math.min(44, Math.max(16, Math.round(spanLat / target)))
+  const cols = Math.min(44, Math.max(16, Math.round(spanLng / target)))
+  const stepLat = spanLat / rows
+  const stepLng = spanLng / cols
+
+  // Deterministic per-field phase offsets so each field reads differently.
+  let seed = field.id.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0)
+  const rand = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff
+    return seed / 0x7fffffff
+  }
+  const p1 = rand() * 6.28
+  const p2 = rand() * 6.28
+  const p3 = rand() * 6.28
+
+  const cells: FieldCell[] = []
+
+  for (let i = 0; i < rows; i += 1) {
+    for (let j = 0; j < cols; j += 1) {
+      const lat = minLat + i * stepLat
+      const lng = minLng + j * stepLng
+      const center: [number, number] = [lat + stepLat / 2, lng + stepLng / 2]
+
+      if (!pointInRing(center, field.boundary)) {
+        continue
+      }
+
+      const nx = j / cols
+      const ny = i / rows
+      // Smooth, low-frequency field — adjacent cells stay close in value.
+      const smooth =
+        0.17 * Math.sin(nx * 6.5 + p1) +
+        0.13 * Math.cos(ny * 5.5 + p2) +
+        0.09 * Math.sin((nx + ny) * 9.5 + p3) +
+        0.06 * Math.cos((nx - ny) * 13 + p1)
+      // tiny deterministic grain
+      const grain = (Math.sin((i * 928.1 + j * 13.7)) * 0.5 + 0.5 - 0.5) * 0.03
+      const ndvi = Math.max(0.2, Math.min(0.9, field.ndvi + smooth + grain))
+
+      cells.push({
+        id: `${field.id}-${i}-${j}`,
+        positions: [
+          [lat, lng],
+          [lat, lng + stepLng],
+          [lat + stepLat, lng + stepLng],
+          [lat + stepLat, lng],
+        ],
+        ndvi: Number(ndvi.toFixed(2)),
+        ndmi: Number(((ndvi - 0.55) * 0.6).toFixed(2)),
+        color: layerCellColor(ndvi, layer),
+      })
+    }
+  }
+
+  return cells
+}
 
 const farmFrontier: [number, number][] = [
   [50.253112, 2.746722],
@@ -50,7 +199,7 @@ type RasterCell = {
 }
 
 type ViewMode = 'crop' | 'productivity' | 'moisture' | 'thermal' | 'prescription'
-type MenuPage = 'config' | 'agent' | 'doctor'
+type MenuPage = 'fields' | 'config' | 'agent' | 'doctor'
 type DemoStage = 'login' | 'loading' | 'ready'
 type CropDoctorStatus = 'idle' | 'analyzing' | 'done' | 'error'
 
@@ -199,13 +348,6 @@ for (let lat = farmBounds.south; lat < farmBounds.north; lat += latStep) {
   }
 }
 
-const analysisPoints: [number, number][] = [
-  [50.2524, 2.7468],
-  [50.2507, 2.7456],
-  [50.25015, 2.7488],
-  [50.2517, 2.74955],
-]
-
 const viewModes: {
   description: string
   icon: typeof Sprout
@@ -316,45 +458,6 @@ function isInsideFarm(point: [number, number]) {
   }
 
   return inside
-}
-
-function makePointSquare([lat, lng]: [number, number], size: number): [number, number][] {
-  return [
-    [lat - size, lng - size],
-    [lat - size, lng + size],
-    [lat + size, lng + size],
-    [lat + size, lng - size],
-  ]
-}
-
-function getCellStyle(cell: RasterCell, activeView: ViewMode) {
-  if (activeView === 'moisture') {
-    const moisture = (cell.ndmi + 0.22) / 0.54
-    return {
-      color: moisture > 0.66 ? '#1c8ec9' : moisture > 0.45 ? '#5ab1cf' : '#d7a33a',
-      opacity: 0.54,
-    }
-  }
-
-  if (activeView === 'thermal') {
-    return {
-      color: cell.thermal > 1 ? '#d9562f' : cell.thermal > 0.2 ? '#e0bd35' : '#149a5a',
-      opacity: 0.56,
-    }
-  }
-
-  if (activeView === 'prescription') {
-    const rate = Number.parseInt(cell.rate, 10)
-    return {
-      color: rate >= 76 ? '#8b4bb2' : rate >= 70 ? '#c979be' : '#ead8f0',
-      opacity: 0.58,
-    }
-  }
-
-  return {
-    color: cell.color,
-    opacity: activeView === 'crop' ? 0.18 : 0.52,
-  }
 }
 
 function getCellPrimaryValue(cell: RasterCell, activeView: ViewMode) {
@@ -505,12 +608,6 @@ function buildFarmContext(selectedCell: RasterCell | null, activeView: ViewMode,
   }
 }
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? ''
-
-function apiPath(path: string) {
-  return `${apiBaseUrl}${path}`
-}
-
 function extractBackendAnswer(payload: unknown) {
   if (
     payload &&
@@ -542,7 +639,7 @@ async function askOpenAIAgent({
     text: message.text,
   }))
 
-  const response = await fetch(apiPath('/api/agent'), {
+  const response = await authFetch('/api/agent', {
     body: JSON.stringify({
       farmContext: buildFarmContext(selectedCell, activeView, copiedCoordinate),
       question,
@@ -587,7 +684,7 @@ function readImageAsDataUrl(file: File) {
 }
 
 async function askCropDoctor(imageUrl: string, fileName: string, activeView: ViewMode, selectedCell: RasterCell | null) {
-  const response = await fetch(apiPath('/api/crop-doctor'), {
+  const response = await authFetch('/api/crop-doctor', {
     body: JSON.stringify({
       activeMapView: activeView,
       fileName,
@@ -623,12 +720,19 @@ async function askCropDoctor(imageUrl: string, fileName: string, activeView: Vie
   return text
 }
 
-function App({ authMode = 'demo' }: { authMode?: 'clerk' | 'demo' }) {
+function App({
+  authMode = 'demo',
+  onSignOut,
+}: {
+  authMode?: 'clerk' | 'demo' | 'supabase'
+  onSignOut?: () => void
+}) {
   const clerkEnabled = authMode === 'clerk'
-  const [demoStage, setDemoStage] = useState<DemoStage>(clerkEnabled ? 'loading' : 'login')
+  const authenticated = authMode === 'clerk' || authMode === 'supabase'
+  const [demoStage, setDemoStage] = useState<DemoStage>(authenticated ? 'loading' : 'login')
   const [loadingStep, setLoadingStep] = useState(0)
   const [activeView, setActiveView] = useState<ViewMode>('productivity')
-  const [activeMenuPage, setActiveMenuPage] = useState<MenuPage>('config')
+  const [activeMenuPage, setActiveMenuPage] = useState<MenuPage>('fields')
   const [draftQuestion, setDraftQuestion] = useState('')
   const [messages, setMessages] = useState<PlaygroundMessage[]>([
     {
@@ -648,6 +752,57 @@ function App({ authMode = 'demo' }: { authMode?: 'clerk' | 'demo' }) {
   const [zoneCount, setZoneCount] = useState(3)
   const [standardRate, setStandardRate] = useState(70000)
   const selectedAnalysis = selectedCell ? getZoneAnalysis(selectedCell, activeView) : null
+
+  // Field-management surface (Branch 2) — data via the typed dataLayer (mock; live in Branch 3).
+  const [fields, setFields] = useState<Field[]>([])
+  const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null)
+  const [fieldDetail, setFieldDetail] = useState<FieldDetail | null>(null)
+  const [checkedFieldIds, setCheckedFieldIds] = useState<Set<string>>(new Set())
+  const [showWeatherModal, setShowWeatherModal] = useState(false)
+  const [mapLayer, setMapLayer] = useState<MapLayerId>('productivity')
+  const [overlayVisible, setOverlayVisible] = useState(true)
+  const [mapQuery, setMapQuery] = useState('')
+
+  const showRaster = overlayVisible && RASTER_LAYERS.has(mapLayer)
+  const fieldRasters = useMemo(
+    () => (showRaster ? fields.map((field) => ({ field, cells: buildFieldRaster(field, mapLayer) })) : []),
+    [fields, mapLayer, showRaster],
+  )
+
+  const handleLayerChange = (id: MapLayerId) => {
+    setMapLayer(id)
+
+    if (id === 'crop') {
+      setActiveView('crop')
+      setOverlayVisible(true)
+    } else if (id === 'productivity' || id === 'vegetation') {
+      setActiveView('productivity')
+      setOverlayVisible(true)
+    } else if (id === 'moisture') {
+      setActiveView('moisture')
+      setOverlayVisible(true)
+    } else if (id === 'yield') {
+      setActiveView('prescription')
+      setOverlayVisible(true)
+    } else {
+      // satellite / planting date / harvest date → imagery only
+      setOverlayVisible(false)
+    }
+  }
+
+  const toggleFieldCheck = (id: string) => {
+    setCheckedFieldIds((current) => {
+      const next = new Set(current)
+
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+
+      return next
+    })
+  }
 
   useEffect(() => {
     if (demoStage !== 'loading') {
@@ -678,7 +833,7 @@ function App({ authMode = 'demo' }: { authMode?: 'clerk' | 'demo' }) {
 
     const controller = new AbortController()
 
-    fetch(apiPath('/api/sources'), { signal: controller.signal })
+    authFetch('/api/sources', { signal: controller.signal })
       .then((response) => response.json())
       .then((payload: unknown) => {
         if (
@@ -696,6 +851,39 @@ function App({ authMode = 'demo' }: { authMode?: 'clerk' | 'demo' }) {
 
     return () => controller.abort()
   }, [demoStage])
+
+  useEffect(() => {
+    let active = true
+
+    void dataLayer.listFields().then((list) => {
+      if (active) {
+        setFields(list)
+      }
+    })
+
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!selectedFieldId) {
+      setFieldDetail(null)
+      return undefined
+    }
+
+    let active = true
+
+    void dataLayer.getFieldDetail(selectedFieldId).then((detail) => {
+      if (active) {
+        setFieldDetail(detail)
+      }
+    })
+
+    return () => {
+      active = false
+    }
+  }, [selectedFieldId])
 
   const askAgent = async (question: string) => {
     const trimmed = question.trim()
@@ -779,10 +967,6 @@ function App({ authMode = 'demo' }: { authMode?: 'clerk' | 'demo' }) {
 
     copyTextToClipboard(formatted)
   }
-  const selectCell = (cell: RasterCell, coordinate?: [number, number]) => {
-    setSelectedCell(cell)
-    copyCoordinate(coordinate ?? getCellCenter(cell), cell)
-  }
   const runAgentAction = (action: 'inspect' | 'moisture' | 'prescription' | 'task') => {
     if (action === 'inspect') {
       setActiveView('thermal')
@@ -849,7 +1033,7 @@ function App({ authMode = 'demo' }: { authMode?: 'clerk' | 'demo' }) {
         <section className="demo-entry-panel">
           <div className="demo-brand">
             <span>
-              <Sprout size={26} />
+              <WheatLogo size={26} />
             </span>
             <b>Demeter</b>
           </div>
@@ -917,40 +1101,95 @@ function App({ authMode = 'demo' }: { authMode?: 'clerk' | 'demo' }) {
     <main className="map-only">
       <aside className={`side-shell ${menuOpen ? 'open' : 'closed'}`} aria-label="Prescription configuration">
         <nav className="icon-rail" aria-label="Product navigation">
-          <button className="brand-button" type="button" aria-label="Demeter">
-            <Sprout size={23} />
-          </button>
-          <button
-            className={activeMenuPage === 'config' ? 'active' : ''}
-            type="button"
-            aria-label="Configuration"
-            onClick={() => setActiveMenuPage('config')}
-          >
-            <Grid2X2 size={20} />
-          </button>
-          <button
-            className={activeMenuPage === 'agent' ? 'active' : ''}
-            type="button"
-            aria-label="Farm agent"
-            onClick={() => setActiveMenuPage('agent')}
-          >
-            <Sparkles size={20} />
-          </button>
-          <button
-            className={activeMenuPage === 'doctor' ? 'active' : ''}
-            type="button"
-            aria-label="Crop Doctor"
-            onClick={() => setActiveMenuPage('doctor')}
-          >
-            <Camera size={20} />
-          </button>
+          <div className="icon-rail__group">
+            <button className="brand-button" type="button" aria-label="Demeter">
+              <WheatLogo size={24} />
+            </button>
+            <button
+              className={activeMenuPage === 'fields' ? 'active' : ''}
+              type="button"
+              aria-label="Fields"
+              onClick={() => setActiveMenuPage('fields')}
+            >
+              <Layers3 size={20} />
+            </button>
+            <button
+              className={activeMenuPage === 'config' ? 'active' : ''}
+              type="button"
+              aria-label="Configuration"
+              onClick={() => setActiveMenuPage('config')}
+            >
+              <Grid2X2 size={20} />
+            </button>
+            <button
+              className={activeMenuPage === 'agent' ? 'active' : ''}
+              type="button"
+              aria-label="Farm agent"
+              onClick={() => setActiveMenuPage('agent')}
+            >
+              <Sparkles size={20} />
+            </button>
+            <button
+              className={activeMenuPage === 'doctor' ? 'active' : ''}
+              type="button"
+              aria-label="Crop Doctor"
+              onClick={() => setActiveMenuPage('doctor')}
+            >
+              <Camera size={20} />
+            </button>
+          </div>
+
+          <div className="icon-rail__group icon-rail__group--bottom">
+            <button type="button" aria-label="Support" title="Support">
+              <Headphones size={20} />
+            </button>
+            <button type="button" aria-label="Mobile app" title="Mobile app">
+              <Leaf size={20} />
+            </button>
+            <button type="button" aria-label="Knowledge base" title="Knowledge base">
+              <BookOpen size={20} />
+            </button>
+            <button type="button" aria-label="Get the app" title="Get the app">
+              <Smartphone size={20} />
+            </button>
+            <button
+              type="button"
+              aria-label="Account"
+              title={onSignOut ? 'Account · sign out' : 'Account'}
+              onClick={() => onSignOut?.()}
+            >
+              <CircleUserRound size={20} />
+            </button>
+          </div>
         </nav>
 
         <section className="config-panel">
+          {activeMenuPage === 'fields' ? (
+            <FieldListPanel
+              fields={fields}
+              totalAreaHa={Number(fields.reduce((sum, field) => sum + field.areaHa, 0).toFixed(2))}
+              selectedFieldId={selectedFieldId}
+              checkedFieldIds={checkedFieldIds}
+              onSelectField={(id) => setSelectedFieldId(id)}
+              onToggleCheck={toggleFieldCheck}
+              onAddFields={() => undefined}
+            />
+          ) : (
+          <>
           <header className="config-header">
             <span>Demeter</span>
             <div className="header-actions">
               {clerkEnabled && <UserButton />}
+              {onSignOut && (
+                <Button
+                  className="hide-menu-button"
+                  icon="log-out"
+                  minimal
+                  small
+                  onClick={onSignOut}
+                  aria-label="Sign out"
+                />
+              )}
               <Button
                 className="hide-menu-button"
                 icon="chevron-left"
@@ -1176,6 +1415,8 @@ function App({ authMode = 'demo' }: { authMode?: 'clerk' | 'demo' }) {
               </div>
             </section>
           )}
+          </>
+          )}
         </section>
       </aside>
 
@@ -1198,7 +1439,7 @@ function App({ authMode = 'demo' }: { authMode?: 'clerk' | 'demo' }) {
       </aside>
       <MapContainer
         center={farmCenter}
-        zoom={17}
+        zoom={14}
         minZoom={3}
         maxZoom={20}
         zoomControl={false}
@@ -1214,87 +1455,121 @@ function App({ authMode = 'demo' }: { authMode?: 'clerk' | 'demo' }) {
           url="https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
           opacity={0.12}
         />
-        {activeView !== 'crop' && rasterCells.map((cell) => {
-          const style = getCellStyle(cell, activeView)
-          const isSelected = selectedCell?.id === cell.id
+        {fieldRasters.map(({ field, cells }) =>
+          cells.map((cell) => (
+            <Polygon
+              key={cell.id}
+              interactive
+              eventHandlers={{
+                click: (event) => {
+                  setSelectedFieldId(field.id)
+                  copyCoordinate([event.latlng.lat, event.latlng.lng])
+                },
+              }}
+              pathOptions={{
+                color: cell.color,
+                fillColor: cell.color,
+                fillOpacity: 0.58,
+                opacity: 0.58,
+                weight: 1.2,
+              }}
+              positions={cell.positions}
+            >
+              <Tooltip sticky opacity={0.96} className="cell-tooltip">
+                <strong>{field.name}</strong>
+                <span>NDVI {cell.ndvi.toFixed(2)}</span>
+                <span>NDMI {cell.ndmi > 0 ? '+' : ''}{cell.ndmi.toFixed(2)}</span>
+              </Tooltip>
+            </Polygon>
+          )),
+        )}
+        {fields.map((field) => {
+          const isSelected = selectedFieldId === field.id
+          const isChecked = checkedFieldIds.has(field.id)
+          const spec = overlayVisible && !showRaster ? fieldFill(field, mapLayer) : null
 
           return (
-          <Polygon
-            key={cell.id}
-            eventHandlers={{
-              click: (event) => {
-                selectCell(cell, [event.latlng.lat, event.latlng.lng])
-              },
-            }}
-            pathOptions={{
-              className: isSelected ? 'farm-cell selected' : 'farm-cell',
-              color: isSelected ? '#f8fff3' : 'rgba(255,255,255,0.08)',
-              fillColor: style.color,
-              fillOpacity: isSelected ? Math.min(style.opacity + 0.18, 0.78) : style.opacity,
-              opacity: isSelected ? 0.98 : 0.16,
-              weight: isSelected ? 2.2 : 0.32,
-            }}
-            positions={cell.positions}
-          >
-            <Tooltip sticky opacity={0.96} className="cube-tooltip">
-              <strong>{isSelected ? 'Selected cell' : cell.label}</strong>
-              <span>{viewMeta[activeView].metric} {getCellPrimaryValue(cell, activeView)}</span>
-              <span>NDVI {cell.ndvi.toFixed(2)}</span>
-              <span>NDMI {cell.ndmi > 0 ? '+' : ''}{cell.ndmi.toFixed(2)}</span>
-              <span>Thermal {cell.thermal > 0 ? '+' : ''}{cell.thermal.toFixed(1)}°C</span>
-              <b>{cell.rate}</b>
-            </Tooltip>
-          </Polygon>
+            <Polygon
+              key={field.id}
+              eventHandlers={{
+                click: (event) => {
+                  setSelectedFieldId(field.id)
+                  copyCoordinate([event.latlng.lat, event.latlng.lng])
+                },
+              }}
+              pathOptions={{
+                color: isSelected || isChecked ? '#18a66c' : '#ffffff',
+                fillColor: isChecked ? '#18a66c' : spec?.fill ?? '#cfd8d0',
+                fillOpacity: isChecked ? 0.4 : spec ? spec.opacity : showRaster ? 0 : 0.06,
+                opacity: isSelected ? 1 : 0.9,
+                weight: isSelected ? 3 : 1.6,
+              }}
+              positions={field.boundary}
+            >
+              <Tooltip direction="center" permanent className="field-label">
+                {field.name}
+              </Tooltip>
+            </Polygon>
           )
         })}
-        <Polygon
-          interactive={false}
-          pathOptions={{
-            color: '#111812',
-            fillOpacity: 0,
-            opacity: 0.95,
-            weight: 4,
-          }}
-          positions={farmFrontier}
-        />
-        {showSamplingPoints && analysisPoints.map((point, index) => (
-          <Polygon
-            key={`${point[0]}-${point[1]}`}
-            interactive={false}
-            pathOptions={{
-              color: '#f7fff4',
-              fillColor: '#121d13',
-              fillOpacity: 0.92,
-              opacity: 0.95,
-              weight: 2,
-            }}
-            positions={makePointSquare(point, index === 0 ? 0.00008 : 0.00006)}
-          />
-        ))}
-        {activeView === 'crop' && cropStrips.map((strip) => (
-          <Polygon
-            key={strip.name}
-            interactive
-            pathOptions={{
-              color: strip.color,
-              fillColor: strip.color,
-              fillOpacity: 0.28,
-              opacity: 0.96,
-              weight: 3.2,
-            }}
-            positions={strip.positions}
-          >
-            <Tooltip sticky opacity={0.96} className="cube-tooltip">
-              <strong>{strip.crop}</strong>
-              <span>{strip.name}</span>
-              <span>{strip.area}</span>
-              <b>Crop zone</b>
-            </Tooltip>
-          </Polygon>
-        ))}
+        <FlyToField field={fields.find((item) => item.id === selectedFieldId) ?? null} allFields={fields} />
         <MapCoordinatePicker onPick={(coordinate) => copyCoordinate(coordinate)} />
         <MapReady />
       </MapContainer>
+
+      <div className="map-layer-anchor">
+        <MapLayerMenu active={mapLayer} onChange={handleLayerChange} />
+      </div>
+
+      <div className="map-toolbar">
+        <div className="map-toolbar__search">
+          <SearchIcon size={15} />
+          <input
+            placeholder="Search…"
+            value={mapQuery}
+            onChange={(event) => setMapQuery(event.target.value)}
+            aria-label="Search the map"
+          />
+        </div>
+        <button type="button" className="map-toolbar__filter">
+          <Filter size={15} />
+          Filter
+        </button>
+      </div>
+
+      <div className="map-weather-strip">
+        <span>☀ +23°</span>
+        <span>⇒ 4 m/s →</span>
+      </div>
+
+      <div className={`coordinate-readout ${copiedCoordinate ? 'visible' : ''}`} aria-live="polite">
+        <span>{copiedCoordinate ? 'Copied coordinates' : 'Click map for coordinates'}</span>
+        <strong>{copiedCoordinate ?? '50.244400, 2.740500'}</strong>
+      </div>
+
+      {fieldDetail && (
+        <FieldDetailPanel
+          detail={fieldDetail}
+          onClose={() => setSelectedFieldId(null)}
+          onOpenWeather={() => setShowWeatherModal(true)}
+        />
+      )}
+
+      <SelectionActionBar
+        fields={fields}
+        checkedFieldIds={checkedFieldIds}
+        onClear={() => setCheckedFieldIds(new Set())}
+      />
+
+      {showWeatherModal && fieldDetail && (
+        <WeatherModal
+          fieldName={fieldDetail.field.name}
+          detail={fieldDetail}
+          onClose={() => setShowWeatherModal(false)}
+        />
+      )}
+
+      <DemoNotifications />
     </main>
   )
 }
@@ -1328,6 +1603,29 @@ function MapReady() {
   map.whenReady(() => {
     map.invalidateSize()
   })
+
+  return null
+}
+
+function FlyToField({ field, allFields }: { field: Field | null; allFields: Field[] }) {
+  const map = useMap()
+
+  useEffect(() => {
+    if (field) {
+      map.flyToBounds(field.boundary, { padding: [60, 60], maxZoom: 17, duration: 0.7 })
+    }
+  }, [field, map])
+
+  useEffect(() => {
+    if (!field && allFields.length) {
+      map.fitBounds(
+        allFields.flatMap((item) => item.boundary),
+        { padding: [50, 50] },
+      )
+    }
+    // Only re-fit when the field set changes, not on every selection clear.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allFields.length])
 
   return null
 }

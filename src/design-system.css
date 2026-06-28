@@ -1,0 +1,338 @@
+/*
+ * Demeter design system — ported from
+ * /Users/niazi3532/Downloads/demeter-marketing-website/design-system/design.md
+ *
+ * Strict rules kept: square corners, hairline structure, neo-grotesque (Geist),
+ * mono for technical signal, light canvas + dark punctuation.
+ * Sanctioned deviation: a single GREEN accent is allowed (the design.md is pure
+ * monochrome; the product owner approved green for this app).
+ */
+
+:root {
+  /* Surfaces (light) */
+  --bg: #ffffff;
+  --bg-1: #f3f3f3;
+  --bg-2: #efefef;
+  --bg-soft: #f7f7f7;
+
+  /* Ink (text) */
+  --ink: #1e2124;
+  --ink-1: #3a3d40;
+  --muted: #767676;
+  --muted-2: #9a9a9a;
+
+  /* Hairlines */
+  --line: #e2e2e2;
+  --line-2: #dbdbdb;
+  --line-strong: #c4c4c4;
+
+  /* Dark band (hero / rail / footer) */
+  --dark: #121417;
+  --dark-2: #1b1e22;
+  --on-dark: #f4f4f4;
+  --on-dark-muted: rgba(244, 244, 244, 0.58);
+  --line-dark: rgba(255, 255, 255, 0.14);
+  --line-dark-2: rgba(255, 255, 255, 0.22);
+
+  /* GREEN accent (sanctioned) */
+  --accent: #18a66c;
+  --accent-strong: #128a58;
+  --accent-bright: #22c55e;
+  --accent-soft: rgba(24, 166, 108, 0.12);
+  --on-accent: #ffffff;
+
+  /* Status */
+  --ok: var(--accent);
+  --warn: #c9962f;
+  --bad: #c0492b;
+
+  /* Geometry */
+  --radius: 0px;
+  --radius-lg: 0px;
+  --maxw: 1280px;
+  --gutter: 40px;
+
+  /* Fonts */
+  --font-sans: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', 'Cascadia Code', monospace;
+
+  /* Motion */
+  --ease-expo: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ---- Typography ------------------------------------------------------- */
+
+.ds h1,
+.ds h2,
+.ds h3,
+.ds h4 {
+  font-weight: 400;
+  letter-spacing: -0.03em;
+  line-height: 1.02;
+  margin: 0;
+}
+
+.h-display {
+  font-size: clamp(3.2rem, 6vw, 6.5rem);
+  font-weight: 400;
+  letter-spacing: -0.045em;
+}
+
+.h1 {
+  font-size: clamp(2.4rem, 4vw, 4.2rem);
+  font-weight: 400;
+  letter-spacing: -0.04em;
+}
+
+.h2 {
+  font-size: clamp(2rem, 3vw, 3.1rem);
+  font-weight: 400;
+  letter-spacing: -0.035em;
+}
+
+.h3 {
+  font-size: 1.35rem;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+.lead {
+  font-size: clamp(1.1rem, 1.4vw, 1.3rem);
+  letter-spacing: -0.005em;
+  color: var(--muted);
+}
+
+.body {
+  font-size: 1rem;
+  line-height: 1.62;
+  color: var(--ink-1);
+}
+
+.small {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+/* The signature // kicker */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+}
+
+.eyebrow::before {
+  content: '//';
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.eyebrow--plain::before {
+  content: none;
+}
+
+.on-dark .eyebrow::before {
+  color: var(--on-dark);
+}
+
+/* ---- Blueprint v6 re-skin (design.md §8) ----------------------------- */
+
+.bp6-button,
+.bp6-button.bp6-intent-primary {
+  background-image: none !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  font-family: var(--font-sans);
+  font-weight: 500;
+  min-height: 44px;
+  transition:
+    background 0.16s ease,
+    color 0.16s ease,
+    border-color 0.16s ease;
+}
+
+.bp6-button.bp6-large {
+  min-height: 52px;
+}
+
+/* Default / outlined: transparent + hairline, inverts to solid ink on hover */
+.bp6-button:not(.bp6-minimal):not(.bp6-intent-primary) {
+  background: transparent;
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink) !important;
+}
+
+.bp6-button:not(.bp6-minimal):not(.bp6-intent-primary):hover {
+  background: var(--ink);
+  color: var(--bg);
+}
+
+/* Primary: solid ink -> black on hover */
+.bp6-button.bp6-intent-primary {
+  background: var(--ink) !important;
+  color: var(--bg) !important;
+}
+
+.bp6-button.bp6-intent-primary:hover {
+  background: #000 !important;
+}
+
+/* Accent-primary opt-in (green) for the one true CTA per view */
+.bp6-button.accent {
+  background: var(--accent) !important;
+  color: var(--on-accent) !important;
+  box-shadow: none !important;
+}
+
+.bp6-button.accent:hover {
+  background: var(--accent-strong) !important;
+}
+
+.bp6-button.bp6-minimal {
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--ink);
+}
+
+.bp6-button.bp6-minimal:hover {
+  background: var(--bg-1) !important;
+  color: var(--ink);
+}
+
+.bp6-input,
+.bp6-input-group .bp6-input {
+  border-radius: 0 !important;
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--line-2) !important;
+  font-family: var(--font-sans);
+}
+
+.bp6-input:focus {
+  box-shadow: inset 0 0 0 1px var(--ink) !important;
+}
+
+.bp6-html-select select,
+.bp6-select select {
+  border-radius: 0 !important;
+  background-image: none !important;
+  box-shadow: inset 0 0 0 1px var(--line-2) !important;
+  font-family: var(--font-sans);
+}
+
+.bp6-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.bp6-callout {
+  border-radius: 0 !important;
+  background: var(--bg-1);
+  box-shadow: inset 0 0 0 1px var(--line) !important;
+}
+
+.bp6-menu {
+  border-radius: 0 !important;
+  background: var(--bg);
+  box-shadow: 0 1px 0 var(--line), inset 0 0 0 1px var(--line) !important;
+  font-family: var(--font-sans);
+}
+
+.bp6-menu-item {
+  border-radius: 0 !important;
+}
+
+.bp6-menu-item:hover {
+  background: var(--bg-1) !important;
+}
+
+.bp6-card,
+.bp6-dialog,
+.bp6-popover .bp6-popover-content {
+  border-radius: 0 !important;
+}
+
+.bp6-dialog {
+  box-shadow: 0 24px 64px rgba(18, 20, 23, 0.22) !important;
+}
+
+.bp6-control input:checked ~ .bp6-control-indicator {
+  background: var(--accent) !important;
+}
+
+.bp6-tab[aria-selected='true'] {
+  color: var(--ink) !important;
+}
+
+.bp6-tab-indicator {
+  background: var(--accent) !important;
+}
+
+/* ---- Motion (design.md §9) ------------------------------------------- */
+
+.reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity 0.6s var(--ease-expo),
+    transform 0.6s var(--ease-expo);
+}
+
+.has-js .reveal.is-visible,
+.reveal.is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+
+  .reveal {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ---- Square + Geist overrides for legacy demo/auth login screens ----- */
+.demo-entry {
+  font-family: var(--font-sans);
+}
+
+.demo-entry-panel,
+.demo-field input,
+.demo-field select,
+.demo-login-button,
+.oauth-button,
+.demo-brand span {
+  border-radius: 0 !important;
+}
+
+.demo-login-button {
+  background: var(--accent) !important;
+  box-shadow: none !important;
+  font-weight: 500 !important;
+}
+
+.demo-brand span {
+  background: var(--accent) !important;
+}
+
+.demo-copy h1 {
+  font-weight: 400;
+  letter-spacing: -0.03em;
+}
