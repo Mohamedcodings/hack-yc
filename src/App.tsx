@@ -875,7 +875,7 @@ function App() {
               </label>
               <label className="demo-field">
                 <span>Workspace</span>
-                <select value="north-france" readOnly>
+                <select value="north-france" onChange={() => undefined}>
                   <option value="north-france">Ferme du Nord · 26.3 ha</option>
                 </select>
               </label>

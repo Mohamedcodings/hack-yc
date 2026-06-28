@@ -183,6 +183,10 @@ app.use((error: unknown, _request: express.Request, response: express.Response, 
   response.status(status).json({ error: message })
 })
 
-app.listen(config.port, () => {
-  console.log(`Demeter API listening on http://127.0.0.1:${config.port}`)
-})
+if (!process.env.VERCEL) {
+  app.listen(config.port, () => {
+    console.log(`Demeter API listening on http://127.0.0.1:${config.port}`)
+  })
+}
+
+export default app

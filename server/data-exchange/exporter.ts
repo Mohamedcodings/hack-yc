@@ -20,7 +20,11 @@ function classFor(intelligence: IntelligenceState, factor: string) {
   return intelligence.findings.find((finding) => finding.factor === factor)?.riskClass ?? 'low'
 }
 
-function buildSampleRecords(request: DataExchangeRequest, context: LiveFarmContext, intelligence: IntelligenceState) {
+function buildSampleRecords(
+  request: DataExchangeRequest,
+  context: LiveFarmContext,
+  intelligence: IntelligenceState,
+): Array<Record<string, number | string | boolean>> {
   const region = request.region ?? 'Hauts-de-France-demo-grid'
   const uncertainty = intelligence.quality.modelUncertainty
 

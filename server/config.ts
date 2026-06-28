@@ -4,6 +4,7 @@ dotenv.config({ path: '.env.local' })
 dotenv.config()
 
 export const config = {
+  dataMode: process.env.DEMETER_DATA_MODE ?? 'auto',
   nodeEnv: process.env.NODE_ENV ?? 'development',
   openAIModel: process.env.OPENAI_MODEL ?? process.env.VITE_OPENAI_MODEL ?? 'gpt-4.1-mini',
   openAIKey: process.env.OPENAI_API_KEY ?? process.env.VITE_OPENAI_API_KEY,

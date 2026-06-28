@@ -163,6 +163,33 @@ npm run dev
 The app runs at `http://127.0.0.1:5175`.
 The API runs at `http://127.0.0.1:8787`.
 
+## Deploy On Vercel
+
+The repo is Vercel-ready. Vercel serves the React app and routes `/api/*` to the Express backend through `api/[...path].ts`.
+
+Recommended project settings:
+
+- Framework preset: `Vite`
+- Build command: `npm run build`
+- Output directory: `dist`
+- Install command: `npm install`
+
+Environment variables:
+
+```bash
+OPENAI_API_KEY=sk-your-key-here
+OPENAI_MODEL=gpt-4.1-mini
+DEMETER_DATA_MODE=auto
+```
+
+`DEMETER_DATA_MODE` controls public data connectors:
+
+- `auto` - use live public APIs, then fall back to committed verified snapshots if a provider times out.
+- `snapshot` - use bundled snapshots only for zero external-data friction.
+- `live` - require live Open-Meteo, SoilGrids, and Copernicus responses.
+
+This means reviewers can open one deployed URL without configuring Copernicus, SoilGrids, Open-Meteo, or local backend services. OpenAI-powered agent features work when `OPENAI_API_KEY` is configured in Vercel.
+
 ## Demo Flow
 
 1. Log in with the prefilled farmer credentials.

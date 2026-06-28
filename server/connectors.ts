@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+
+import { config } from './config.ts'
 import { farmBounds, farmCenter } from './farm.ts'
 import { farmDataSources, type FarmDataSource } from './provenance.ts'
 
@@ -18,17 +21,19 @@ type WeatherPayload = {
   }
 }
 
+type SoilGridsLayer = {
+  depths?: Array<{
+    label?: string
+    values?: {
+      mean?: number
+    }
+  }>
+  name?: string
+}
+
 type SoilGridsPayload = {
   properties?: {
-    layers?: Array<{
-      depths?: Array<{
-        label?: string
-        values?: {
-          mean?: number
-        }
-      }>
-      name?: string
-    }>
+    layers?: SoilGridsLayer[]
   }
   type?: string
 }
@@ -42,6 +47,52 @@ type StacPayload = {
     }
   }>
   type?: string
+}
+
+type WeatherContextResponse = {
+  provider: string
+  source: FarmDataSource
+  weather: WeatherPayload & {
+    summary?: {
+      date?: string
+      maxTemp?: number
+      minTemp?: number
+      precipitationMm?: number
+    }
+  }
+}
+
+type SoilContextResponse = {
+  provider: string
+  soil: {
+    layers: SoilGridsLayer[]
+    summary: string
+    type?: string
+  }
+  source: FarmDataSource
+}
+
+type SatelliteContextResponse = {
+  provider: string
+  satellite: {
+    latestProductId?: string
+    latestSceneDate: string
+    productCount: number
+    sceneCloudCover?: number
+  }
+  source: FarmDataSource
+}
+
+function readFixture<T>(fileName: string): T {
+  return JSON.parse(readFileSync(new URL(`./fixtures/live-context/${fileName}`, import.meta.url), 'utf8')) as T
+}
+
+const cachedWeatherFixture = readFixture<WeatherContextResponse>('weather.json')
+const cachedSoilFixture = readFixture<SoilContextResponse>('soil.json')
+const cachedSatelliteFixture = readFixture<SatelliteContextResponse>('satellite.json')
+
+function clone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
 }
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -87,7 +138,64 @@ function degradedSource(id: string, error: unknown): FarmDataSource {
   }
 }
 
-export async function fetchWeatherContext() {
+function cachedSource(source: FarmDataSource, error: unknown): FarmDataSource {
+  const message = error instanceof Error ? error.message : 'live connector unavailable'
+
+  return {
+    ...source,
+    evidence: `${source.evidence ?? 'cached connector snapshot'} · snapshot fallback: ${message}`,
+    lastSync: `${source.lastSync} · cached fallback`,
+    status: 'degraded',
+  }
+}
+
+function cachedWeatherContext(error: unknown): WeatherContextResponse {
+  const cached = clone(cachedWeatherFixture)
+
+  return {
+    ...cached,
+    provider: `${cached.provider} · cached fallback`,
+    source: cachedSource(cached.source, error),
+  }
+}
+
+function cachedSoilContext(error: unknown): SoilContextResponse {
+  const cached = clone(cachedSoilFixture)
+
+  return {
+    ...cached,
+    provider: `${cached.provider} · cached fallback`,
+    source: cachedSource(cached.source, error),
+  }
+}
+
+function cachedSatelliteContext(error: unknown): SatelliteContextResponse {
+  const cached = clone(cachedSatelliteFixture)
+
+  return {
+    ...cached,
+    provider: `${cached.provider} · cached fallback`,
+    source: cachedSource(cached.source, error),
+  }
+}
+
+async function withConnectorMode<T>(fetchLive: () => Promise<T>, fetchCached: (error: unknown) => T): Promise<T> {
+  if (config.dataMode === 'snapshot') {
+    return fetchCached(new Error('DEMETER_DATA_MODE=snapshot'))
+  }
+
+  try {
+    return await fetchLive()
+  } catch (error) {
+    if (config.dataMode === 'live') {
+      throw error
+    }
+
+    return fetchCached(error)
+  }
+}
+
+async function fetchWeatherLive(): Promise<WeatherContextResponse> {
   const url = new URL('https://api.open-meteo.com/v1/forecast')
 
   url.searchParams.set('latitude', String(farmCenter.lat))
@@ -126,7 +234,11 @@ export async function fetchWeatherContext() {
   }
 }
 
-export async function fetchSoilContext() {
+export async function fetchWeatherContext() {
+  return withConnectorMode(fetchWeatherLive, cachedWeatherContext)
+}
+
+async function fetchSoilLive(): Promise<SoilContextResponse> {
   const url = new URL('https://rest.isric.org/soilgrids/v2.0/properties/query')
 
   url.searchParams.set('lon', String(farmCenter.lon))
@@ -161,7 +273,11 @@ export async function fetchSoilContext() {
   }
 }
 
-export async function fetchSatelliteContext() {
+export async function fetchSoilContext() {
+  return withConnectorMode(fetchSoilLive, cachedSoilContext)
+}
+
+async function fetchSatelliteLive(): Promise<SatelliteContextResponse> {
   const body = {
     bbox: [farmBounds.west, farmBounds.south, farmBounds.east, farmBounds.north],
     collections: ['sentinel-2-l2a'],
@@ -194,6 +310,10 @@ export async function fetchSatelliteContext() {
       lastSync: latestDate,
     }),
   }
+}
+
+export async function fetchSatelliteContext() {
+  return withConnectorMode(fetchSatelliteLive, cachedSatelliteContext)
 }
 
 export async function getLiveDataSources() {
