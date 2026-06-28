@@ -38,7 +38,12 @@ app.use((request, response, next) => {
 })
 
 if (authEnabled) {
-  app.use(clerkMiddleware())
+  app.use(
+    clerkMiddleware({
+      publishableKey: config.clerkPublishableKey,
+      secretKey: config.clerkSecretKey,
+    }),
+  )
 }
 
 const requireAuth: express.RequestHandler = (request, response, next) => {

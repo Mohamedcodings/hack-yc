@@ -12,6 +12,7 @@ function configuredSecret(value: string | undefined) {
 }
 
 export const config = {
+  clerkPublishableKey: configuredSecret(process.env.CLERK_PUBLISHABLE_KEY ?? process.env.VITE_CLERK_PUBLISHABLE_KEY),
   clerkSecretKey: configuredSecret(process.env.CLERK_SECRET_KEY),
   dataMode: process.env.DEMETER_DATA_MODE ?? 'auto',
   nodeEnv: process.env.NODE_ENV ?? 'development',
