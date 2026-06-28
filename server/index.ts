@@ -1,4 +1,5 @@
 import express from 'express'
+import { clerkMiddleware, getAuth } from '@clerk/express'
 import { ZodError } from 'zod'
 
 import { config } from './config.ts'
@@ -20,6 +21,7 @@ import { buildAgentInput, buildCropDoctorInput } from './prompts.ts'
 import { agentRequestSchema, cropDoctorRequestSchema, dataExchangeRequestSchema } from './schemas.ts'
 
 const app = express()
+const authEnabled = Boolean(config.clerkSecretKey)
 
 app.use(express.json({ limit: '12mb' }))
 app.use((request, response, next) => {
@@ -35,8 +37,31 @@ app.use((request, response, next) => {
   next()
 })
 
+if (authEnabled) {
+  app.use(clerkMiddleware())
+}
+
+const requireAuth: express.RequestHandler = (request, response, next) => {
+  if (!authEnabled) {
+    next()
+    return
+  }
+
+  const { userId } = getAuth(request)
+
+  if (!userId) {
+    response.status(401).json({
+      error: 'Authentication required',
+    })
+    return
+  }
+
+  next()
+}
+
 app.get('/api/health', (_request, response) => {
   response.json({
+    auth: authEnabled ? 'clerk' : 'demo',
     ok: true,
     model: config.openAIModel,
     service: 'demeter-api',
@@ -79,7 +104,7 @@ app.get('/api/live/satellite', async (_request, response, next) => {
   }
 })
 
-app.get('/api/farm-context', async (_request, response, next) => {
+app.get('/api/farm-context', requireAuth, async (_request, response, next) => {
   try {
     response.json({
       context: await getLiveFarmContext(),
@@ -91,7 +116,7 @@ app.get('/api/farm-context', async (_request, response, next) => {
   }
 })
 
-app.get('/api/intelligence/field-state', async (_request, response, next) => {
+app.get('/api/intelligence/field-state', requireAuth, async (_request, response, next) => {
   try {
     const context = await getLiveFarmContext()
 
@@ -125,7 +150,7 @@ app.get('/api/data-exchange/governance', (_request, response) => {
   })
 })
 
-app.post('/api/data-exchange/export', async (request, response, next) => {
+app.post('/api/data-exchange/export', requireAuth, async (request, response, next) => {
   try {
     const payload = dataExchangeRequestSchema.parse(request.body)
     const context = await getLiveFarmContext()
@@ -137,7 +162,7 @@ app.post('/api/data-exchange/export', async (request, response, next) => {
   }
 })
 
-app.post('/api/agent', async (request, response, next) => {
+app.post('/api/agent', requireAuth, async (request, response, next) => {
   try {
     const payload = agentRequestSchema.parse(request.body)
     const answer = await createModelResponse({
@@ -151,7 +176,7 @@ app.post('/api/agent', async (request, response, next) => {
   }
 })
 
-app.post('/api/crop-doctor', async (request, response, next) => {
+app.post('/api/crop-doctor', requireAuth, async (request, response, next) => {
   try {
     const payload = cropDoctorRequestSchema.parse(request.body)
     const answer = await createModelResponse({

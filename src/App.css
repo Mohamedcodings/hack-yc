@@ -35,6 +35,11 @@
   backdrop-filter: blur(18px);
 }
 
+.demo-entry-panel.auth-panel {
+  gap: 22px;
+  width: min(500px, calc(100vw - 42px));
+}
+
 .demo-brand {
   display: flex;
   align-items: center;
@@ -52,6 +57,8 @@
   border-radius: 9px;
   background: #18a66c;
   box-shadow: 0 14px 34px rgba(24, 166, 108, 0.28);
+  color: #10291d;
+  font-weight: 950;
 }
 
 .demo-copy p,
@@ -276,6 +283,12 @@
 
 .config-header button {
   color: #3a8f67;
+}
+
+.header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .hide-menu-button {

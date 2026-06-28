@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { UserButton } from '@clerk/clerk-react'
 import { Button, Card, FormGroup, HTMLSelect, NumericInput, Switch } from '@blueprintjs/core'
 import {
   Camera,
@@ -622,8 +623,9 @@ async function askCropDoctor(imageUrl: string, fileName: string, activeView: Vie
   return text
 }
 
-function App() {
-  const [demoStage, setDemoStage] = useState<DemoStage>('login')
+function App({ authMode = 'demo' }: { authMode?: 'clerk' | 'demo' }) {
+  const clerkEnabled = authMode === 'clerk'
+  const [demoStage, setDemoStage] = useState<DemoStage>(clerkEnabled ? 'loading' : 'login')
   const [loadingStep, setLoadingStep] = useState(0)
   const [activeView, setActiveView] = useState<ViewMode>('productivity')
   const [activeMenuPage, setActiveMenuPage] = useState<MenuPage>('config')
@@ -947,14 +949,17 @@ function App() {
         <section className="config-panel">
           <header className="config-header">
             <span>Demeter</span>
-            <Button
-              className="hide-menu-button"
-              icon="chevron-left"
-              minimal
-              small
-              onClick={() => setMenuOpen(false)}
-              aria-label="Hide menu"
-            />
+            <div className="header-actions">
+              {clerkEnabled && <UserButton />}
+              <Button
+                className="hide-menu-button"
+                icon="chevron-left"
+                minimal
+                small
+                onClick={() => setMenuOpen(false)}
+                aria-label="Hide menu"
+              />
+            </div>
           </header>
 
           <section className="config-title">

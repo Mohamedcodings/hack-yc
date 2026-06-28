@@ -182,6 +182,15 @@ OPENAI_MODEL=gpt-4.1-mini
 DEMETER_DATA_MODE=auto
 ```
 
+Optional real authentication with Clerk:
+
+```bash
+VITE_CLERK_PUBLISHABLE_KEY=pk_test_or_pk_live
+CLERK_SECRET_KEY=sk_test_or_sk_live
+```
+
+When Clerk keys are present, the app uses hosted Clerk sign-in and protects sensitive API routes such as the farm agent, crop doctor, field intelligence, and data exchange export. When Clerk keys are absent, the app keeps the local demo login so judges can still run the project without auth setup.
+
 `DEMETER_DATA_MODE` controls public data connectors:
 
 - `auto` - use live public APIs, then fall back to committed verified snapshots if a provider times out.

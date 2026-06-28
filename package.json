@@ -14,6 +14,8 @@
   "dependencies": {
     "@blueprintjs/core": "^6.16.0",
     "@blueprintjs/icons": "^6.11.0",
+    "@clerk/clerk-react": "^5.61.8",
+    "@clerk/express": "^2.1.32",
     "@types/leaflet": "^1.9.21",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
